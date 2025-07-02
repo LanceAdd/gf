@@ -718,6 +718,11 @@ func (m *Model) getFormattedSqlAndArgs(
 		if len(m.groupBy) > 0 {
 			sqlWithHolder = fmt.Sprintf("SELECT COUNT(1) FROM (%s) count_alias", sqlWithHolder)
 		}
+		if m.cteItems != nil && len(m.cteItems) > 0 {
+			cteSqlWithHolder, cteSqlArgs := m.formatCte()
+			sqlWithHolder = fmt.Sprintf("%s %s", cteSqlWithHolder, sqlWithHolder)
+			conditionArgs = append(cteSqlArgs, conditionArgs...)
+		}
 		return sqlWithHolder, conditionArgs
 
 	default:
@@ -737,6 +742,11 @@ func (m *Model) getFormattedSqlAndArgs(
 			"SELECT %s%s FROM %s%s",
 			m.distinct, m.getFieldsFiltered(), m.tables, conditionWhere+conditionExtra,
 		)
+		if m.cteItems != nil && len(m.cteItems) > 0 {
+			cteSqlWithHolder, cteSqlArgs := m.formatCte()
+			sqlWithHolder = fmt.Sprintf("%s %s", cteSqlWithHolder, sqlWithHolder)
+			conditionArgs = append(cteSqlArgs, conditionArgs...)
+		}
 		return sqlWithHolder, conditionArgs
 	}
 }
