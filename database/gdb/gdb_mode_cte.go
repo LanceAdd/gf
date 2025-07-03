@@ -39,18 +39,35 @@ func (m *Model) WithCte(name string, query *Model, recursive ...bool) *Model {
 	if len(recursive) > 0 {
 		r = recursive[0]
 	}
-	if model.cteItems == nil {
-		model.cteItems = make([]cteItem, 0)
-	}
 	ctx := model.db.GetCtx()
 	cteSql, cteSqlArgs := query.getFormattedSqlAndArgs(ctx, SelectTypeDefault, false)
 	cte := cteItem{
-		Name:       name,
+		Name:       m.QuoteWord(name),
 		CteSql:     cteSql,
 		CteSqlArgs: cteSqlArgs,
 		Recursive:  r,
 	}
 	model.cteItems = append(model.cteItems, cte)
+	return model
+}
+
+// RemoveCte removes one or more Common Table Expressions (CTEs) from the model by their names.
+// This method allows dynamically removing previously defined CTEs so that they no longer take effect in the query.
+// If no names are provided, this method has no effect.
+func (m *Model) RemoveCte(name ...string) *Model {
+	model := m.getModel()
+	if len(name) > 0 {
+		for _, v := range name {
+			n := 0
+			for _, item := range model.cteItems {
+				if item.Name == m.QuoteWord(v) {
+					model.cteItems[n] = item
+					n++
+				}
+			}
+			model.cteItems = model.cteItems[:n]
+		}
+	}
 	return model
 }
 
@@ -60,7 +77,7 @@ func (m *Model) WithCte(name string, query *Model, recursive ...bool) *Model {
 // Returns:
 //   - string: The formatted CTE SQL string.
 //   - []interface{}: The arguments corresponding to placeholders in the SQL string.
-func (m *Model) formatCte() (string, []interface{}) {
+func (m *Model) formatCte() (string, []any) {
 	if m.cteItems == nil || len(m.cteItems) == 0 {
 		return "", nil
 	}
@@ -80,7 +97,7 @@ func (m *Model) formatCte() (string, []interface{}) {
 		builder.WriteString("RECURSIVE ")
 	}
 	for k, v := range m.cteItems {
-		builder.WriteString(m.QuoteWord(v.Name))
+		builder.WriteString(v.Name)
 		builder.WriteString(" AS (")
 		builder.WriteString(v.CteSql)
 		builder.WriteString(")")
