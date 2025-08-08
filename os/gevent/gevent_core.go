@@ -2,11 +2,12 @@ package gevent
 
 import (
 	"context"
+	"sync"
+
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/container/gtype"
 	"github.com/gogf/gf/v2/util/gutil"
-	"sync"
 )
 
 type EventHandler struct {
