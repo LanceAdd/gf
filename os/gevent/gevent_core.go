@@ -1,7 +1,6 @@
 package gevent
 
 import (
-	"context"
 	"sync"
 
 	"github.com/gogf/gf/v2/container/garray"
@@ -26,14 +25,15 @@ type ManagerOption struct {
 }
 
 type EventManager struct {
-	mu      sync.RWMutex
-	topics  *gmap.StrAnyMap
-	factory *gmap.StrAnyMap
-	counter *gtype.Int64
-	closed  *gtype.Bool
-	chOnce  sync.Once
-	ch      chan Event
-	options ManagerOption
+	mu        sync.RWMutex
+	topics    *gmap.StrAnyMap
+	factory   *gmap.StrAnyMap
+	counter   *gtype.Int64
+	closeOnce sync.Once
+	closed    *gtype.Bool
+	ch        chan Event
+	options   ManagerOption
+	waitGroup sync.WaitGroup
 }
 
 func New(options ...ManagerOption) *EventManager {
@@ -41,42 +41,59 @@ func New(options ...ManagerOption) *EventManager {
 		EnableLock: false,
 		QueueSize:  100,
 		WorkerSize: 10,
-		OnError:    ErrorStrategyStop,
 	}
 	if len(options) > 0 {
 		option = options[0]
 	}
-	return &EventManager{
+	manager := EventManager{
 		topics:  gmap.NewStrAnyMap(true),
 		factory: gmap.NewStrAnyMap(true),
 		counter: gtype.NewInt64(),
 		closed:  gtype.NewBool(),
+		ch:      make(chan Event, option.QueueSize),
 		options: option,
 	}
+	manager.startConsumer()
+	return &manager
 }
 
 type BaseEvent struct {
-	Topic string
-	Data  map[string]any
+	Topic   string
+	Data    map[string]any
+	OnError ErrorStrategy
 }
 
-func (b *BaseEvent) SetTopic(topic string) {
-	b.Topic = topic
+func (be *BaseEvent) SetTopic(topic string) {
+	be.Topic = topic
 }
 
-func (b *BaseEvent) GetTopic() string {
-	return b.Topic
+func (be *BaseEvent) GetTopic() string {
+	return be.Topic
 }
 
-func (b *BaseEvent) SetData(data map[string]any) {
-	b.Data = data
+func (be *BaseEvent) SetData(data map[string]any) {
+	be.Data = data
 }
 
-func (b *BaseEvent) GetData() map[string]any {
-	return b.Data
+func (be *BaseEvent) GetData() map[string]any {
+	return be.Data
+}
+func (be *BaseEvent) SetErrorStrategy(strategy ErrorStrategy) {
+	be.OnError = strategy
+}
+func (be *BaseEvent) GetErrorStrategy() ErrorStrategy {
+	return be.OnError
 }
 
-func (e *EventManager) RegisterEventFactoryFunc(topic string, factoryFunc EventFactoryFunc) (bool, error) {
+func (be *BaseEvent) Clone() Event {
+	return &BaseEvent{
+		Topic:   be.Topic,
+		Data:    be.Data,
+		OnError: be.OnError,
+	}
+}
+
+func (em *EventManager) RegisterEventFactoryFunc(topic string, factoryFunc EventFactoryFunc) (bool, error) {
 	if gutil.IsEmpty(topic) {
 		return false, TopicEmptyError
 	}
@@ -84,46 +101,20 @@ func (e *EventManager) RegisterEventFactoryFunc(topic string, factoryFunc EventF
 	if factoryFunc == nil {
 		return false, FactoryFuncIsNilError
 	}
-	e.factory.Set(topic, factoryFunc)
+	em.factory.Set(topic, factoryFunc)
 	return true, nil
 }
 
-func (e *EventManager) factoryEvent(topic string, params map[string]any) (bool, error) {
-
-	return true, nil
-}
-
-func NewEvent(topic string, params map[string]any) *BaseEvent {
-	return &BaseEvent{
-		Topic: topic,
-		Data:  params,
-	}
-}
-
-func (e *EventManager) PublishBlock(topic string, params map[string]any) (bool, error) {
-	if topic == "" {
+func (em *EventManager) UnRegisterEventFactoryFunc(topic string) (bool, error) {
+	if gutil.IsEmpty(topic) {
 		return false, TopicEmptyError
 	}
-	if e.closed.Val() {
-		return false, ManagerClosedError
-	}
-	handlers := e.filterHandlers(topic)
-	for _, handler := range handlers {
-		var err error
-		if handler.recoverFunc != nil {
-			err = e.executeHandlerWithRecover(topic, params, handler)
-		} else {
-			err = e.executeHandler(topic, params, handler)
-		}
-		if err != nil && e.options.OnError == ErrorStrategyStop {
-			return false, err
-		}
-	}
+	em.factory.Remove(topic)
 	return true, nil
 }
 
-func (e *EventManager) filterHandlers(topic string) []*EventHandler {
-	value := e.topics.Get(topic)
+func (em *EventManager) filterHandlers(topic string) []*EventHandler {
+	value := em.topics.Get(topic)
 	if value == nil {
 		return nil
 	}
@@ -139,7 +130,123 @@ func (e *EventManager) filterHandlers(topic string) []*EventHandler {
 	return handlersSlice
 }
 
-func (e *EventManager) executeHandlerWithRecover(topic string, params map[string]any, handler *EventHandler) error {
+func (em *EventManager) factoryEvent(topic string, params map[string]any) Event {
+	value := em.factory.Get(topic)
+	if value != nil {
+		if f, ok := value.(EventFactoryFunc); ok {
+			return f(topic, params)
+		}
+	}
+	return BaseEventFactory(topic, params)
+}
+
+func (em *EventManager) executeEventBlock(event Event) (bool, error) {
+	handlers := em.filterHandlers(event.GetTopic())
+	for _, handler := range handlers {
+		var err error
+		e := event.Clone()
+		if handler.recoverFunc != nil {
+			err = em.executeHandlerWithRecover(e, handler)
+		} else {
+			err = em.executeHandler(e, handler)
+		}
+		if err != nil {
+			if e.GetErrorStrategy() == ErrorStrategyStop {
+				return false, err
+			} else if em.options.OnError == ErrorStrategyStop {
+				return false, err
+			} else {
+				continue
+			}
+		}
+	}
+	return true, nil
+}
+
+func (em *EventManager) executeEventParallel(event Event) {
+	handlers := em.filterHandlers(event.GetTopic())
+	var wg sync.WaitGroup
+	for _, handler := range handlers {
+		wg.Add(1)
+		go func(e Event, handler *EventHandler) {
+			defer wg.Done()
+			if handler.recoverFunc != nil {
+				_ = em.executeHandlerWithRecover(e, handler)
+			} else {
+				_ = em.executeHandler(e, handler)
+			}
+		}(event.Clone(), handler)
+	}
+	go func() {
+		wg.Wait()
+	}()
+}
+
+func (em *EventManager) executeEventParallelWait(event Event) []error {
+	handlers := em.filterHandlers(event.GetTopic())
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(handlers))
+	for _, handler := range handlers {
+		wg.Add(1)
+		go func(e Event, handler *EventHandler) {
+			defer wg.Done()
+			var err error
+			if handler.recoverFunc != nil {
+				err = em.executeHandlerWithRecover(e, handler)
+			} else {
+				err = em.executeHandler(e, handler)
+			}
+			errCh <- err
+		}(event.Clone(), handler)
+	}
+	wg.Wait()
+	close(errCh)
+	var errors []error
+	for err := range errCh {
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+	return errors
+}
+
+func (em *EventManager) executeEventChannel(event Event) (bool, error) {
+	select {
+	case em.ch <- event:
+		return true, nil
+	default:
+		return false, ManagerChannelFullError
+	}
+}
+
+func (em *EventManager) startConsumer() {
+	go func() {
+		defer func() {
+			em.factory.Clear()
+			em.topics.Clear()
+		}()
+		for range em.options.WorkerSize {
+			em.waitGroup.Add(1)
+			go func(em *EventManager) {
+				defer em.waitGroup.Done()
+				for event := range em.ch {
+					handlers := em.filterHandlers(event.GetTopic())
+					for _, handler := range handlers {
+						e := event.Clone()
+						if handler.recoverFunc != nil {
+							_ = em.executeHandlerWithRecover(e, handler)
+						} else {
+							_ = em.executeHandler(e, handler)
+						}
+					}
+				}
+			}(em)
+		}
+		em.waitGroup.Wait()
+	}()
+}
+
+func (em *EventManager) executeHandlerWithRecover(event Event, handler *EventHandler) error {
 	wrapper := func(e Event, handlerFunc HandlerFunc, recoverFunc RecoverFunc) error {
 		defer func() {
 			if r := recover(); r != nil {
@@ -148,145 +255,146 @@ func (e *EventManager) executeHandlerWithRecover(topic string, params map[string
 		}()
 		return handlerFunc(e)
 	}
-	return wrapper(NewEvent(topic, params), handler.handlerFunc, handler.recoverFunc)
+	return wrapper(event, handler.handlerFunc, handler.recoverFunc)
 }
 
-func (e *EventManager) executeHandler(topic string, params map[string]any, handler *EventHandler) error {
-	return handler.handlerFunc(NewEvent(topic, params))
+func (em *EventManager) executeHandler(event Event, handler *EventHandler) error {
+	return handler.handlerFunc(event)
 }
 
-func (e *EventManager) PublishAsync(topic string, params map[string]any) {
-	if topic == "" {
-		return
-	}
-	if e.closed.Val() {
-		return
-	}
-	go func() {
-		_, _ = e.PublishBlock(topic, params)
-	}()
-}
-
-func (e *EventManager) PublishParallel(topic string, params map[string]any) {
-	if topic == "" {
-		return
-	}
-	if e.closed.Val() {
-		return
-	}
-	handlers := e.filterHandlers(topic)
-	var wg sync.WaitGroup
-	for _, handler := range handlers {
-		wg.Add(1)
-		go func(handler *EventHandler) {
-			defer wg.Done()
-			if handler.recoverFunc != nil {
-				_ = e.executeHandlerWithRecover(topic, params, handler)
-			} else {
-				_ = e.executeHandler(topic, params, handler)
-			}
-		}(handler)
-	}
-	go func() {
-		wg.Wait()
-	}()
-}
-
-func (e *EventManager) PublishParallelWait(topic string, params map[string]any) []error {
-	if topic == "" {
-		return []error{TopicEmptyError}
-	}
-	if e.closed.Val() {
-		return []error{ManagerClosedError}
-	}
-	handlers := e.filterHandlers(topic)
-	var wg sync.WaitGroup
-	ch := make(chan error, len(handlers))
-	for _, handler := range handlers {
-		wg.Add(1)
-		go func(handler *EventHandler) {
-			defer wg.Done()
-			var err error
-			if handler.recoverFunc != nil {
-				err = e.executeHandlerWithRecover(topic, params, handler)
-			} else {
-				err = e.executeHandler(topic, params, handler)
-			}
-			ch <- err
-		}(handler)
-	}
-	wg.Wait()
-	close(ch)
-	var errors []error
-	for err := range ch {
-		if err != nil {
-			errors = append(errors, err)
-		}
-	}
-	return errors
-}
-
-func (e *EventManager) PublishChannel(topic string, params map[string]any) (bool, error) {
+func (em *EventManager) PublishBlock(topic string, params map[string]any) (bool, error) {
 	if topic == "" {
 		return false, TopicEmptyError
 	}
-	if e.closed.Val() {
+	if em.closed.Val() {
 		return false, ManagerClosedError
 	}
-	e.chOnce.Do(func() {
-		e.ch = make(chan Event, e.options.QueueSize)
-		e.StartConsumer()
+	event := em.factoryEvent(topic, params)
+	return em.executeEventBlock(event)
+}
+
+func (em *EventManager) PublishEventBlock(event Event) (bool, error) {
+	if event == nil {
+		return false, EventEmptyError
+	}
+	if event.GetTopic() == "" {
+		return false, TopicEmptyError
+	}
+	if em.closed.Val() {
+		return false, ManagerClosedError
+	}
+	return em.executeEventBlock(event)
+}
+
+func (em *EventManager) PublishAsync(topic string, params map[string]any) error {
+	if topic == "" {
+		return TopicEmptyError
+	}
+	if em.closed.Val() {
+		return ManagerClosedError
+	}
+	event := em.factoryEvent(topic, params)
+	go func(e Event) {
+		_, _ = em.executeEventBlock(e)
+	}(event)
+	return nil
+}
+
+func (em *EventManager) PublishEventAsync(event Event) error {
+	if event == nil {
+		return EventEmptyError
+	}
+	if event.GetTopic() == "" {
+		return TopicEmptyError
+	}
+	if em.closed.Val() {
+		return ManagerClosedError
+	}
+	go func(e Event) {
+		_, _ = em.executeEventBlock(e)
+	}(event)
+	return nil
+}
+
+func (em *EventManager) PublishParallel(topic string, params map[string]any) error {
+	if topic == "" {
+		return TopicEmptyError
+	}
+	if em.closed.Val() {
+		return ManagerClosedError
+	}
+	event := em.factoryEvent(topic, params)
+	em.executeEventParallel(event)
+	return nil
+}
+
+func (em *EventManager) PublishEventParallel(event Event) error {
+	if event == nil {
+		return EventEmptyError
+	}
+	if event.GetTopic() == "" {
+		return TopicEmptyError
+	}
+	if em.closed.Val() {
+		return ManagerClosedError
+	}
+	em.executeEventParallel(event)
+	return nil
+}
+
+func (em *EventManager) PublishParallelWait(topic string, params map[string]any) []error {
+	if topic == "" {
+		return []error{TopicEmptyError}
+	}
+	if em.closed.Val() {
+		return []error{ManagerClosedError}
+	}
+	event := em.factoryEvent(topic, params)
+	return em.executeEventParallelWait(event)
+}
+
+func (em *EventManager) PublishEventParallelWait(event Event) []error {
+	if event == nil {
+		return []error{EventEmptyError}
+	}
+	if event.GetTopic() == "" {
+		return []error{TopicEmptyError}
+	}
+	if em.closed.Val() {
+		return []error{ManagerClosedError}
+	}
+	return em.executeEventParallelWait(event)
+}
+
+func (em *EventManager) PublishChannel(topic string, params map[string]any) (bool, error) {
+	if topic == "" {
+		return false, TopicEmptyError
+	}
+	if em.closed.Val() {
+		return false, ManagerClosedError
+	}
+	event := em.factoryEvent(topic, params)
+	return em.executeEventChannel(event)
+}
+
+func (em *EventManager) PublishEventChannel(event Event) (bool, error) {
+	if event == nil {
+		return false, EventEmptyError
+	}
+	if event.GetTopic() == "" {
+		return false, TopicEmptyError
+	}
+	if em.closed.Val() {
+		return false, ManagerClosedError
+	}
+	return em.executeEventChannel(event)
+}
+
+func (em *EventManager) Close() {
+	em.closeOnce.Do(func() {
+		em.closed.Set(true)
+		close(em.ch)
 	})
-	select {
-	case e.ch <- NewEvent(topic, params):
-		return true, nil
-	default:
-		return false, ManagerChannelFullError
-	}
-}
-
-func (e *EventManager) StartConsumer() {
-	for range e.options.WorkerSize {
-		go func() {
-			for event := range e.ch {
-				handlers := e.filterHandlers(event.GetTopic())
-				for _, handler := range handlers {
-					if handler.recoverFunc != nil {
-						_ = e.executeHandlerWithRecover(event.GetTopic(), event.GetData(), handler)
-					} else {
-						_ = e.executeHandler(event.GetTopic(), event.GetData(), handler)
-					}
-				}
-			}
-		}()
-	}
-}
-
-func (e *EventManager) PublishCtxAsync(ctx context.Context, topic string, params map[string]any) {
-	if e.closed.Val() {
-		return
-	}
-	go func() {
-		handlers := e.filterHandlers(topic)
-		for _, handler := range handlers {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				if handler.recoverFunc != nil {
-					_ = e.executeHandlerWithRecover(topic, params, handler)
-				} else {
-					_ = e.executeHandler(topic, params, handler)
-				}
-			}
-		}
-	}()
-}
-
-func (e *EventManager) Close() {
-	e.closed.Set(true)
-	close(e.ch)
-	e.topics.Clear()
 }
 
 type Subscriber struct {
@@ -302,8 +410,8 @@ func (s *Subscriber) UnSubscribe() {
 	})
 }
 
-func (e *EventManager) unSubscribe(handler *EventHandler) {
-	value := e.topics.Get(handler.topic)
+func (em *EventManager) unSubscribe(handler *EventHandler) {
+	value := em.topics.Get(handler.topic)
 	if value == nil {
 		return
 	}
@@ -314,13 +422,13 @@ func (e *EventManager) unSubscribe(handler *EventHandler) {
 	handlers.RemoveValue(handler)
 }
 
-func (e *EventManager) SubscribeWithRecover(topic string, handlerFunc HandlerFunc, recoverFunc RecoverFunc, priorities ...Priority) *Subscriber {
+func (em *EventManager) SubscribeWithRecover(topic string, handlerFunc HandlerFunc, recoverFunc RecoverFunc, priorities ...Priority) *Subscriber {
 	priority := PriorityNormal
 	if len(priorities) > 0 {
 		priority = priorities[0]
 	}
-	handlerId := e.counter.Add(1)
-	handlerArray := e.topics.GetOrSet(topic, garray.NewSortedArray(func(a, b interface{}) int {
+	handlerId := em.counter.Add(1)
+	handlerArray := em.topics.GetOrSet(topic, garray.NewSortedArray(func(a, b interface{}) int {
 		ha := a.(*EventHandler)
 		hb := b.(*EventHandler)
 		if ha.priority == hb.priority {
@@ -340,11 +448,11 @@ func (e *EventManager) SubscribeWithRecover(topic string, handlerFunc HandlerFun
 	handlers.Add(handler)
 	return &Subscriber{
 		Topic:   topic,
-		Manager: e,
+		Manager: em,
 		handler: handler,
 	}
 }
 
-func (e *EventManager) Subscribe(topic string, handlerFunc HandlerFunc, priority ...Priority) *Subscriber {
-	return e.SubscribeWithRecover(topic, handlerFunc, nil, priority...)
+func (em *EventManager) Subscribe(topic string, handlerFunc HandlerFunc, priority ...Priority) *Subscriber {
+	return em.SubscribeWithRecover(topic, handlerFunc, nil, priority...)
 }
