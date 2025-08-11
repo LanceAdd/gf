@@ -18,10 +18,11 @@ type EventHandler struct {
 }
 
 type ManagerOption struct {
+	Model      PublishModel
 	EnableLock bool
 	QueueSize  int
 	WorkerSize int
-	OnError    ErrorStrategy
+	OnError    ErrorModel
 }
 
 type EventManager struct {
@@ -55,42 +56,6 @@ func New(options ...ManagerOption) *EventManager {
 	}
 	manager.startConsumer()
 	return &manager
-}
-
-type BaseEvent struct {
-	Topic   string
-	Data    map[string]any
-	OnError ErrorStrategy
-}
-
-func (be *BaseEvent) SetTopic(topic string) {
-	be.Topic = topic
-}
-
-func (be *BaseEvent) GetTopic() string {
-	return be.Topic
-}
-
-func (be *BaseEvent) SetData(data map[string]any) {
-	be.Data = data
-}
-
-func (be *BaseEvent) GetData() map[string]any {
-	return be.Data
-}
-func (be *BaseEvent) SetErrorStrategy(strategy ErrorStrategy) {
-	be.OnError = strategy
-}
-func (be *BaseEvent) GetErrorStrategy() ErrorStrategy {
-	return be.OnError
-}
-
-func (be *BaseEvent) Clone() Event {
-	return &BaseEvent{
-		Topic:   be.Topic,
-		Data:    be.Data,
-		OnError: be.OnError,
-	}
 }
 
 func (em *EventManager) RegisterEventFactoryFunc(topic string, factoryFunc EventFactoryFunc) (bool, error) {
@@ -137,7 +102,7 @@ func (em *EventManager) factoryEvent(topic string, params map[string]any) Event 
 			return f(topic, params)
 		}
 	}
-	return BaseEventFactory(topic, params)
+	return BaseEventFactoryFunc(topic, params)
 }
 
 func (em *EventManager) executeEventBlock(event Event) (bool, error) {
@@ -215,7 +180,7 @@ func (em *EventManager) executeEventChannel(event Event) (bool, error) {
 	case em.ch <- event:
 		return true, nil
 	default:
-		return false, ManagerChannelFullError
+		return false, ChannelFullError
 	}
 }
 
@@ -267,7 +232,7 @@ func (em *EventManager) PublishBlock(topic string, params map[string]any) (bool,
 		return false, TopicEmptyError
 	}
 	if em.closed.Val() {
-		return false, ManagerClosedError
+		return false, ClosedError
 	}
 	event := em.factoryEvent(topic, params)
 	return em.executeEventBlock(event)
@@ -275,13 +240,13 @@ func (em *EventManager) PublishBlock(topic string, params map[string]any) (bool,
 
 func (em *EventManager) PublishEventBlock(event Event) (bool, error) {
 	if event == nil {
-		return false, EventEmptyError
+		return false, EventNilError
 	}
 	if event.GetTopic() == "" {
 		return false, TopicEmptyError
 	}
 	if em.closed.Val() {
-		return false, ManagerClosedError
+		return false, ClosedError
 	}
 	return em.executeEventBlock(event)
 }
@@ -291,7 +256,7 @@ func (em *EventManager) PublishAsync(topic string, params map[string]any) error 
 		return TopicEmptyError
 	}
 	if em.closed.Val() {
-		return ManagerClosedError
+		return ClosedError
 	}
 	event := em.factoryEvent(topic, params)
 	go func(e Event) {
@@ -302,13 +267,13 @@ func (em *EventManager) PublishAsync(topic string, params map[string]any) error 
 
 func (em *EventManager) PublishEventAsync(event Event) error {
 	if event == nil {
-		return EventEmptyError
+		return EventNilError
 	}
 	if event.GetTopic() == "" {
 		return TopicEmptyError
 	}
 	if em.closed.Val() {
-		return ManagerClosedError
+		return ClosedError
 	}
 	go func(e Event) {
 		_, _ = em.executeEventBlock(e)
@@ -321,7 +286,7 @@ func (em *EventManager) PublishParallel(topic string, params map[string]any) err
 		return TopicEmptyError
 	}
 	if em.closed.Val() {
-		return ManagerClosedError
+		return ClosedError
 	}
 	event := em.factoryEvent(topic, params)
 	em.executeEventParallel(event)
@@ -330,13 +295,13 @@ func (em *EventManager) PublishParallel(topic string, params map[string]any) err
 
 func (em *EventManager) PublishEventParallel(event Event) error {
 	if event == nil {
-		return EventEmptyError
+		return EventNilError
 	}
 	if event.GetTopic() == "" {
 		return TopicEmptyError
 	}
 	if em.closed.Val() {
-		return ManagerClosedError
+		return ClosedError
 	}
 	em.executeEventParallel(event)
 	return nil
@@ -347,7 +312,7 @@ func (em *EventManager) PublishParallelWait(topic string, params map[string]any)
 		return []error{TopicEmptyError}
 	}
 	if em.closed.Val() {
-		return []error{ManagerClosedError}
+		return []error{ClosedError}
 	}
 	event := em.factoryEvent(topic, params)
 	return em.executeEventParallelWait(event)
@@ -355,13 +320,13 @@ func (em *EventManager) PublishParallelWait(topic string, params map[string]any)
 
 func (em *EventManager) PublishEventParallelWait(event Event) []error {
 	if event == nil {
-		return []error{EventEmptyError}
+		return []error{EventNilError}
 	}
 	if event.GetTopic() == "" {
 		return []error{TopicEmptyError}
 	}
 	if em.closed.Val() {
-		return []error{ManagerClosedError}
+		return []error{ClosedError}
 	}
 	return em.executeEventParallelWait(event)
 }
@@ -371,7 +336,7 @@ func (em *EventManager) PublishChannel(topic string, params map[string]any) (boo
 		return false, TopicEmptyError
 	}
 	if em.closed.Val() {
-		return false, ManagerClosedError
+		return false, ClosedError
 	}
 	event := em.factoryEvent(topic, params)
 	return em.executeEventChannel(event)
@@ -379,13 +344,13 @@ func (em *EventManager) PublishChannel(topic string, params map[string]any) (boo
 
 func (em *EventManager) PublishEventChannel(event Event) (bool, error) {
 	if event == nil {
-		return false, EventEmptyError
+		return false, EventNilError
 	}
 	if event.GetTopic() == "" {
 		return false, TopicEmptyError
 	}
 	if em.closed.Val() {
-		return false, ManagerClosedError
+		return false, ClosedError
 	}
 	return em.executeEventChannel(event)
 }
