@@ -70,7 +70,7 @@ func (tp *topicProcessor) factoryEvent(topic string, params map[string]any, errM
 	return factoryFunc(topic, params, errModel, execModel)
 }
 
-func (tp *topicProcessor) filterEventProcessors() []*handlerProcessor {
+func (tp *topicProcessor) filterHandlerProcessors() []*handlerProcessor {
 	eventProcessors := make([]*handlerProcessor, 0)
 	tp.processors.Iterator(func(k int, v interface{}) bool {
 		processor := v.(*handlerProcessor)
@@ -128,9 +128,9 @@ func (tp *topicProcessor) asyncProcess() {
 			if tp.processors.IsEmpty() {
 				continue
 			}
-			eventProcessors := tp.filterEventProcessors()
+			handlerProcessors := tp.filterHandlerProcessors()
 			if event.GetExecModel() == Seq {
-				for _, processor := range eventProcessors {
+				for _, processor := range handlerProcessors {
 					err := tp.execute(event, processor)
 					if err != nil {
 						if event.GetErrorModel() == Stop {
@@ -139,11 +139,19 @@ func (tp *topicProcessor) asyncProcess() {
 					}
 				}
 			} else {
+				workerSize := tp.eventBus.option.WorkerSize
+				if workerSize <= 0 {
+					workerSize = len(handlerProcessors)
+				}
+				semaphore := make(chan struct{}, workerSize)
 				var wg sync.WaitGroup
-				for _, processor := range eventProcessors {
+
+				for _, processor := range handlerProcessors {
 					wg.Add(1)
 					go func(e Event, processor *handlerProcessor) {
 						defer wg.Done()
+						semaphore <- struct{}{}
+						defer func() { <-semaphore }()
 						err := tp.execute(e, processor)
 						if err != nil {
 							if event.GetErrorModel() == Stop {
