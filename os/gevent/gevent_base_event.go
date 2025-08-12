@@ -1,10 +1,11 @@
 package gevent
 
-var BaseEventFactoryFunc = func(topic string, params map[string]any) *BaseEvent {
+var BaseEventFactoryFunc = func(topic string, params map[string]any, errorModel ErrorModel, execModel ExecModel) Event {
 	return &BaseEvent{
 		Topic:      topic,
 		Data:       params,
-		errorModel: Ignore,
+		errorModel: errorModel,
+		execModel:  execModel,
 	}
 }
 

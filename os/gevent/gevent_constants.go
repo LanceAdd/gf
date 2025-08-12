@@ -8,7 +8,10 @@ var (
 	ClosedError           = gerror.New("event manager closed")
 	ChannelFullError      = gerror.New("event channel full")
 	TopicEmptyError       = gerror.New("topic is empty")
+	HandlerNilError       = gerror.New("handler is nil")
+	NotFoundError         = gerror.New("not found")
 	SubscriberEmptyError  = gerror.New("subscriber is empty")
+	NoHandlerError        = gerror.New("no handler")
 	EventNilError         = gerror.New("event is empty")
 	FactoryFuncIsNilError = gerror.New("factory func is nil")
 )
@@ -27,8 +30,8 @@ const (
 type ErrorModel int
 
 const (
-	Ignore ErrorModel = iota
-	Stop
+	Stop ErrorModel = iota
+	Ignore
 )
 
 type PublishModel int
@@ -59,7 +62,8 @@ type Event interface {
 
 type HandlerFunc func(e Event) error
 type RecoverFunc func(e Event, err any)
-type EventFactoryFunc func(topic string, params map[string]any) Event
+type ErrorFunc func(e Event, err error) error
+type EventFactoryFunc func(topic string, params map[string]any, errorModel ErrorModel, execModel ExecModel) Event
 
 type EventBus interface {
 	Publish(topic string, params map[string]any) (bool, error)
