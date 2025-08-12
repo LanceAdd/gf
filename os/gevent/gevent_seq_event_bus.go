@@ -10,6 +10,7 @@ import (
 
 type topicProcessor struct {
 	topic        string
+	eventBus     *SeqEventBus
 	ch           chan Event
 	closed       *gtype.Bool
 	processors   *garray.SortedArray
@@ -29,7 +30,6 @@ type handlerProcessor struct {
 }
 
 type SeqEventBusOption struct {
-	Model      PublishModel
 	QueueSize  int
 	WorkerSize int
 	OnError    ErrorModel
@@ -41,6 +41,7 @@ type SeqEventBus struct {
 	closeOnce sync.Once
 	closed    *gtype.Bool
 	option    SeqEventBusOption
+	wg        sync.WaitGroup
 }
 
 func (tp *topicProcessor) unsetFactoryFunc() {
@@ -106,21 +107,29 @@ func (tp *topicProcessor) execute(event Event, processor *handlerProcessor) erro
 	return wrapper(event, processor.handlerFunc, processor.recoverFunc)
 }
 
+func (tp *topicProcessor) clear() {
+	tp.unsetFactoryFunc()
+	tp.processors.Clear()
+}
+func (tp *topicProcessor) close() {
+	tp.closeOnce.Do(func() {
+		close(tp.ch)
+		tp.closed.Set(true)
+	})
+}
 func (tp *topicProcessor) asyncProcess() {
+	tp.eventBus.wg.Add(1)
 	go func() {
 		defer func() {
-			tp.closeOnce.Do(func() {
-				tp.processors.Clear()
-				tp.unsetFactoryFunc()
-				tp.closed.Set(true)
-			})
+			tp.clear()
+			tp.eventBus.wg.Done()
 		}()
 		for event := range tp.ch {
 			if tp.processors.IsEmpty() {
 				continue
 			}
 			eventProcessors := tp.filterEventProcessors()
-			if event.GetHandleStrategy() == Seq {
+			if event.GetExecModel() == Seq {
 				for _, processor := range eventProcessors {
 					err := tp.execute(event, processor)
 					if err != nil {
@@ -151,7 +160,6 @@ func (tp *topicProcessor) asyncProcess() {
 
 func NewSeqEventBus(options ...SeqEventBusOption) *SeqEventBus {
 	option := SeqEventBusOption{
-		Model:      DropIfFull,
 		QueueSize:  100,
 		WorkerSize: 10,
 		OnError:    Ignore,
@@ -168,6 +176,9 @@ func NewSeqEventBus(options ...SeqEventBusOption) *SeqEventBus {
 }
 
 func (s *SeqEventBus) RegisterFactoryFunc(topic string, factoryFunc EventFactoryFunc) (bool, error) {
+	if s.closed.Val() {
+		return false, EventBusClosedError
+	}
 	if topic == "" {
 		return false, TopicEmptyError
 	}
@@ -175,11 +186,17 @@ func (s *SeqEventBus) RegisterFactoryFunc(topic string, factoryFunc EventFactory
 		return s.initTopicProcessor(topic)
 	})
 	tp := value.(*topicProcessor)
+	if tp.closed.Val() {
+		return false, EventBusClosedError
+	}
 	tp.setFactoryFunc(factoryFunc)
 	return true, nil
 }
 
 func (s *SeqEventBus) UnRegisterFactoryFunc(topic string) (bool, error) {
+	if s.closed.Val() {
+		return false, EventBusClosedError
+	}
 	if topic == "" {
 		return false, TopicEmptyError
 	}
@@ -188,11 +205,17 @@ func (s *SeqEventBus) UnRegisterFactoryFunc(topic string) (bool, error) {
 		return false, SubscriberEmptyError
 	}
 	tp := value.(*topicProcessor)
+	if tp.closed.Val() {
+		return false, EventBusClosedError
+	}
 	tp.unsetFactoryFunc()
 	return true, nil
 }
 
 func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel ErrorModel, execModel ExecModel) (bool, error) {
+	if s.closed.Val() {
+		return false, EventBusClosedError
+	}
 	if topic == "" {
 		return false, TopicEmptyError
 	}
@@ -201,6 +224,9 @@ func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel Erro
 		return false, SubscriberEmptyError
 	}
 	processor := v.(*topicProcessor)
+	if processor.closed.Val() {
+		return false, EventBusClosedError
+	}
 	event := processor.factoryEvent(topic, params, errModel, execModel)
 	select {
 	case processor.ch <- event:
@@ -211,10 +237,11 @@ func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel Erro
 }
 
 func (s *SeqEventBus) initTopicProcessor(topic string) *topicProcessor {
-	return &topicProcessor{
-		topic:  topic,
-		ch:     make(chan Event, s.option.QueueSize),
-		closed: gtype.NewBool(),
+	processor := &topicProcessor{
+		topic:    topic,
+		eventBus: s,
+		ch:       make(chan Event, s.option.QueueSize),
+		closed:   gtype.NewBool(),
 		processors: garray.NewSortedArray(func(a, b interface{}) int {
 			ha := a.(*handlerProcessor)
 			hb := b.(*handlerProcessor)
@@ -225,10 +252,14 @@ func (s *SeqEventBus) initTopicProcessor(topic string) *topicProcessor {
 			}
 		}, true),
 	}
-
+	processor.startOnce.Do(processor.asyncProcess)
+	return processor
 }
 
 func (s *SeqEventBus) PublishEvent(event Event) (bool, error) {
+	if s.closed.Val() {
+		return false, EventBusClosedError
+	}
 	if event == nil {
 		return false, EventNilError
 	}
@@ -241,6 +272,9 @@ func (s *SeqEventBus) PublishEvent(event Event) (bool, error) {
 		return false, SubscriberEmptyError
 	}
 	processor := v.(*topicProcessor)
+	if processor.closed.Val() {
+		return false, EventBusClosedError
+	}
 	select {
 	case processor.ch <- event:
 		return true, nil
@@ -250,6 +284,9 @@ func (s *SeqEventBus) PublishEvent(event Event) (bool, error) {
 }
 
 func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, errorFunc ErrorFunc, recoverFunc RecoverFunc, priorities ...Priority) (*SeqEventBusSubscriber, error) {
+	if s.closed.Val() {
+		return nil, EventBusClosedError
+	}
 	if topic == "" {
 		return nil, TopicEmptyError
 	}
@@ -264,8 +301,9 @@ func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, errorFunc
 		return s.initTopicProcessor(topic)
 	})
 	processor := value.(*topicProcessor)
-	processor.startOnce.Do(processor.asyncProcess)
-
+	if processor.closed.Val() {
+		return nil, EventBusClosedError
+	}
 	handlerId := s.counter.Add(1)
 	handler := &handlerProcessor{
 		id:          handlerId,
@@ -277,19 +315,32 @@ func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, errorFunc
 	}
 	processor.processors.Add(handler)
 	return &SeqEventBusSubscriber{
-		Topic:    topic,
-		EventBus: s,
-		handler:  handler,
+		topic:        topic,
+		eventBus:     s,
+		handler:      handler,
+		unsubscribed: gtype.NewBool(),
 	}, nil
 }
 func (s *SeqEventBus) UnSubscribe(topic string, processor *handlerProcessor) (bool, error) {
+	if s.closed.Val() {
+		return false, EventBusClosedError
+	}
 	value := s.topics.Get(topic)
 	if value == nil {
 		return false, SubscriberEmptyError
 	}
 	tp := value.(*topicProcessor)
+	if tp.closed.Val() {
+		return false, EventBusClosedError
+	}
 	res := tp.processors.RemoveValue(processor)
 	if res {
+		tp.processors.LockFunc(func(array []interface{}) {
+			if len(array) == 0 {
+				s.topics.Remove(topic)
+				tp.close()
+			}
+		})
 		return true, nil
 	}
 	return res, NoHandlerError
@@ -301,18 +352,30 @@ func (s *SeqEventBus) Close() {
 		s.topics.LockFunc(func(m map[string]interface{}) {
 			for _, value := range m {
 				tp := value.(*topicProcessor)
-				close(tp.ch)
+				tp.close()
 			}
 		})
+		s.wg.Wait()
 	})
+}
 
+func (s *SeqEventBus) IsClosed() bool {
+	return s.closed.Val()
 }
 
 type SeqEventBusSubscriber struct {
-	Topic    string
-	once     sync.Once
-	EventBus *SeqEventBus
-	handler  *handlerProcessor
+	topic        string
+	once         sync.Once
+	eventBus     *SeqEventBus
+	handler      *handlerProcessor
+	unsubscribed *gtype.Bool
+}
+
+func (sub *SeqEventBusSubscriber) GetTopic() string {
+	return sub.topic
+}
+func (sub *SeqEventBusSubscriber) GetEventBus() *SeqEventBus {
+	return sub.eventBus
 }
 
 func (sub *SeqEventBusSubscriber) UnSubscribe() (bool, error) {
@@ -321,7 +384,13 @@ func (sub *SeqEventBusSubscriber) UnSubscribe() (bool, error) {
 		err error
 	)
 	sub.once.Do(func() {
-		res, err = sub.EventBus.UnSubscribe(sub.Topic, sub.handler)
+		res, err = sub.eventBus.UnSubscribe(sub.topic, sub.handler)
+		if err == nil {
+			sub.unsubscribed.Set(true)
+		}
 	})
+	if sub.unsubscribed.Val() {
+		return true, nil
+	}
 	return res, err
 }

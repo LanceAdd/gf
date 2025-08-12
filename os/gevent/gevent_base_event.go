@@ -38,11 +38,11 @@ func (be *BaseEvent) GetErrorModel() ErrorModel {
 	return be.errorModel
 }
 
-func (be *BaseEvent) GetHandleStrategy() ExecModel {
+func (be *BaseEvent) GetExecModel() ExecModel {
 	return be.execModel
 }
 
-func (be *BaseEvent) SetHandleStrategy(execModel ExecModel) {
+func (be *BaseEvent) SetExecModel(execModel ExecModel) {
 	be.execModel = execModel
 }
 
