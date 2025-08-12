@@ -1,3 +1,9 @@
+// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
+//
+// This Source Code Form is subject to the terms of the MIT License.
+// If a copy of the MIT was not distributed with this file,
+// You can obtain one at https://github.com/gogf/gf.
+
 package gevent
 
 import (
@@ -8,59 +14,67 @@ import (
 	"github.com/gogf/gf/v2/container/gtype"
 )
 
+// topicProcessor handles events for a specific topic
 type topicProcessor struct {
-	topic        string
-	eventBus     *SeqEventBus
-	ch           chan Event
-	closed       *gtype.Bool
-	processors   *garray.SortedArray
-	factoryFunc  EventFactoryFunc
-	factoryMutex sync.RWMutex
-	startOnce    sync.Once
-	closeOnce    sync.Once
+	topic        string              // Topic name
+	eventBus     *SeqEventBus        // Reference to the parent event bus
+	ch           chan Event          // Channel for receiving events
+	closed       *gtype.Bool         // Indicates if the processor is closed
+	processors   *garray.SortedArray // Sorted array of event handlers
+	factoryFunc  EventFactoryFunc    // Custom event factory function
+	factoryMutex sync.RWMutex        // Mutex for factory function access
+	startOnce    sync.Once           // Ensures asyncProcess is started only once
+	closeOnce    sync.Once           // Ensures close is called only once
 }
 
+// handlerProcessor represents a registered event handler
 type handlerProcessor struct {
-	id          int64
-	priority    Priority
-	topic       string
-	handlerFunc HandlerFunc
-	recoverFunc RecoverFunc
-	errorFunc   ErrorFunc
+	id          int64       // Unique identifier for the handler
+	priority    Priority    // Handler priority
+	topic       string      // Topic name
+	handlerFunc HandlerFunc // Event handler function
+	recoverFunc RecoverFunc // Error recovery function
+	errorFunc   ErrorFunc   // Error handler function
 }
 
+// SeqEventBusOption defines configuration options for SeqEventBus
 type SeqEventBusOption struct {
-	QueueSize  int
-	WorkerSize int
+	QueueSize  int // Size of the event queue channel
+	WorkerSize int // Number of workers for parallel execution
 }
 
+// SeqEventBus is a sequential event bus implementation
 type SeqEventBus struct {
-	topics    *gmap.StrAnyMap
-	counter   *gtype.Int64
-	closeOnce sync.Once
-	closed    *gtype.Bool
-	option    SeqEventBusOption
-	wg        sync.WaitGroup
+	topics    *gmap.StrAnyMap   // Map of topic processors
+	counter   *gtype.Int64      // Counter for generating unique handler IDs
+	closeOnce sync.Once         // Ensures Close is called only once
+	closed    *gtype.Bool       // Indicates if the event bus is closed
+	option    SeqEventBusOption // Configuration options
+	wg        sync.WaitGroup    // WaitGroup for tracking active goroutines
 }
 
+// unsetFactoryFunc removes the custom event factory function
 func (tp *topicProcessor) unsetFactoryFunc() {
 	tp.factoryMutex.Lock()
 	defer tp.factoryMutex.Unlock()
 	tp.factoryFunc = nil
 }
 
+// setFactoryFunc sets a custom event factory function
 func (tp *topicProcessor) setFactoryFunc(factoryFunc EventFactoryFunc) {
 	tp.factoryMutex.Lock()
 	defer tp.factoryMutex.Unlock()
 	tp.factoryFunc = factoryFunc
 }
 
+// getFactoryFunc gets the custom event factory function
 func (tp *topicProcessor) getFactoryFunc() EventFactoryFunc {
 	tp.factoryMutex.RLock()
 	defer tp.factoryMutex.RUnlock()
 	return tp.factoryFunc
 }
 
+// factoryEvent creates a new event using the factory function or default factory
 func (tp *topicProcessor) factoryEvent(topic string, params map[string]any, errModel ErrorModel, execModel ExecModel) Event {
 	factoryFunc := tp.getFactoryFunc()
 	if factoryFunc == nil {
@@ -69,6 +83,7 @@ func (tp *topicProcessor) factoryEvent(topic string, params map[string]any, errM
 	return factoryFunc(topic, params, errModel, execModel)
 }
 
+// filterHandlerProcessors returns all registered handlers for this topic
 func (tp *topicProcessor) filterHandlerProcessors() []*handlerProcessor {
 	eventProcessors := make([]*handlerProcessor, 0)
 	tp.processors.Iterator(func(k int, v interface{}) bool {
@@ -79,6 +94,7 @@ func (tp *topicProcessor) filterHandlerProcessors() []*handlerProcessor {
 	return eventProcessors
 }
 
+// execute runs a handler function with appropriate error handling
 func (tp *topicProcessor) execute(event Event, processor *handlerProcessor) error {
 	if processor.recoverFunc == nil {
 		wrapper := func(e Event, handlerFunc HandlerFunc) error {
@@ -106,16 +122,21 @@ func (tp *topicProcessor) execute(event Event, processor *handlerProcessor) erro
 	return wrapper(event, processor.handlerFunc, processor.recoverFunc)
 }
 
+// clear cleans up resources used by the topic processor
 func (tp *topicProcessor) clear() {
 	tp.unsetFactoryFunc()
 	tp.processors.Clear()
 }
+
+// close closes the topic processor and its event channel
 func (tp *topicProcessor) close() {
 	tp.closeOnce.Do(func() {
 		close(tp.ch)
 		tp.closed.Set(true)
 	})
 }
+
+// asyncProcess processes events asynchronously from the channel
 func (tp *topicProcessor) asyncProcess() {
 	tp.eventBus.wg.Add(1)
 	go func() {
@@ -129,6 +150,7 @@ func (tp *topicProcessor) asyncProcess() {
 			}
 			handlerProcessors := tp.filterHandlerProcessors()
 			if event.GetExecModel() == Seq {
+				// Sequential execution
 				for _, processor := range handlerProcessors {
 					err := tp.execute(event, processor)
 					if err != nil {
@@ -138,6 +160,7 @@ func (tp *topicProcessor) asyncProcess() {
 					}
 				}
 			} else {
+				// Parallel execution
 				workerSize := tp.eventBus.option.WorkerSize
 				if workerSize <= 0 {
 					workerSize = len(handlerProcessors)
@@ -165,10 +188,11 @@ func (tp *topicProcessor) asyncProcess() {
 	}()
 }
 
+// NewSeqEventBus creates a new sequential event bus with optional configuration
 func NewSeqEventBus(options ...SeqEventBusOption) *SeqEventBus {
 	option := SeqEventBusOption{
-		QueueSize:  100,
-		WorkerSize: 10,
+		QueueSize:  100, // Default queue size
+		WorkerSize: 10,  // Default worker size for parallel execution
 	}
 	if len(options) > 0 {
 		option = options[0]
@@ -181,6 +205,7 @@ func NewSeqEventBus(options ...SeqEventBusOption) *SeqEventBus {
 	}
 }
 
+// RegisterFactoryFunc registers a custom event factory function for a topic
 func (s *SeqEventBus) RegisterFactoryFunc(topic string, factoryFunc EventFactoryFunc) (bool, error) {
 	if s.closed.Val() {
 		return false, EventBusClosedError
@@ -199,6 +224,7 @@ func (s *SeqEventBus) RegisterFactoryFunc(topic string, factoryFunc EventFactory
 	return true, nil
 }
 
+// UnRegisterFactoryFunc removes the custom event factory function for a topic
 func (s *SeqEventBus) UnRegisterFactoryFunc(topic string) (bool, error) {
 	if s.closed.Val() {
 		return false, EventBusClosedError
@@ -218,6 +244,7 @@ func (s *SeqEventBus) UnRegisterFactoryFunc(topic string) (bool, error) {
 	return true, nil
 }
 
+// Publish publishes an event with the given parameters
 func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel ErrorModel, execModel ExecModel) (bool, error) {
 	if s.closed.Val() {
 		return false, EventBusClosedError
@@ -242,6 +269,7 @@ func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel Erro
 	}
 }
 
+// initTopicProcessor initializes a topic processor for a new topic
 func (s *SeqEventBus) initTopicProcessor(topic string) *topicProcessor {
 	processor := &topicProcessor{
 		topic:    topic,
@@ -262,6 +290,7 @@ func (s *SeqEventBus) initTopicProcessor(topic string) *topicProcessor {
 	return processor
 }
 
+// PublishEvent publishes a pre-created event
 func (s *SeqEventBus) PublishEvent(event Event) (bool, error) {
 	if s.closed.Val() {
 		return false, EventBusClosedError
@@ -289,6 +318,7 @@ func (s *SeqEventBus) PublishEvent(event Event) (bool, error) {
 	}
 }
 
+// Subscribe registers an event handler for a topic
 func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, errorFunc ErrorFunc, recoverFunc RecoverFunc, priorities ...Priority) (*SeqEventBusSubscriber, error) {
 	if s.closed.Val() {
 		return nil, EventBusClosedError
@@ -327,6 +357,8 @@ func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, errorFunc
 		unsubscribed: gtype.NewBool(),
 	}, nil
 }
+
+// UnSubscribe removes an event handler from a topic
 func (s *SeqEventBus) UnSubscribe(topic string, processor *handlerProcessor) (bool, error) {
 	if s.closed.Val() {
 		return false, EventBusClosedError
@@ -352,6 +384,7 @@ func (s *SeqEventBus) UnSubscribe(topic string, processor *handlerProcessor) (bo
 	return res, NoHandlerError
 }
 
+// Close shuts down the event bus and all its processors
 func (s *SeqEventBus) Close() {
 	s.closeOnce.Do(func() {
 		s.closed.Set(true)
@@ -365,25 +398,31 @@ func (s *SeqEventBus) Close() {
 	})
 }
 
+// IsClosed checks if the event bus is closed
 func (s *SeqEventBus) IsClosed() bool {
 	return s.closed.Val()
 }
 
+// SeqEventBusSubscriber represents a subscription to a topic
 type SeqEventBusSubscriber struct {
-	topic        string
-	once         sync.Once
-	eventBus     *SeqEventBus
-	handler      *handlerProcessor
-	unsubscribed *gtype.Bool
+	topic        string            // Topic name
+	once         sync.Once         // Ensures UnSubscribe is called only once
+	eventBus     *SeqEventBus      // Reference to the event bus
+	handler      *handlerProcessor // Reference to the handler
+	unsubscribed *gtype.Bool       // Indicates if the subscription is cancelled
 }
 
+// GetTopic gets the topic for this subscription
 func (sub *SeqEventBusSubscriber) GetTopic() string {
 	return sub.topic
 }
+
+// GetEventBus gets the event bus for this subscription
 func (sub *SeqEventBusSubscriber) GetEventBus() *SeqEventBus {
 	return sub.eventBus
 }
 
+// UnSubscribe cancels this subscription
 func (sub *SeqEventBusSubscriber) UnSubscribe() (bool, error) {
 	var (
 		res bool
