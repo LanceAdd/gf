@@ -1,10 +1,11 @@
 package gevent
 
 import (
+	"sync"
+
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/container/gtype"
-	"sync"
 )
 
 type topicProcessor struct {
