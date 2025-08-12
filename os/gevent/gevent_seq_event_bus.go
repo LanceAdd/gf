@@ -32,7 +32,6 @@ type handlerProcessor struct {
 type SeqEventBusOption struct {
 	QueueSize  int
 	WorkerSize int
-	OnError    ErrorModel
 }
 
 type SeqEventBus struct {
@@ -170,7 +169,6 @@ func NewSeqEventBus(options ...SeqEventBusOption) *SeqEventBus {
 	option := SeqEventBusOption{
 		QueueSize:  100,
 		WorkerSize: 10,
-		OnError:    Ignore,
 	}
 	if len(options) > 0 {
 		option = options[0]
