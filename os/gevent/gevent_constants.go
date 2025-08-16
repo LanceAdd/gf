@@ -84,3 +84,16 @@ const (
 	// Parallel indicates parallel execution
 	Parallel
 )
+
+const (
+	DefaultQueueSize  = 1024
+	DefaultWorkerSize = 10
+)
+
+type BlockingMode int
+
+const (
+	NoBlocking BlockingMode = iota
+	BlockingPublish
+	BlockingExecute
+)

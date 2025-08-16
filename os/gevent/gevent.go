@@ -8,6 +8,7 @@ package gevent
 
 // DefaultEventBus is the default event bus instance.
 var DefaultEventBus = NewSeqEventBus(SeqEventBusOption{
-	QueueSize:  1000,
-	WorkerSize: 10,
+	QueueSize:    DefaultQueueSize,
+	WorkerSize:   DefaultWorkerSize,
+	BlockingMode: NoBlocking,
 })

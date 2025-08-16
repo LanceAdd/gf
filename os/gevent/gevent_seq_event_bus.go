@@ -39,8 +39,9 @@ type handlerProcessor struct {
 
 // SeqEventBusOption defines configuration options for SeqEventBus
 type SeqEventBusOption struct {
-	QueueSize  int // Size of the event queue channel
-	WorkerSize int // Number of workers for parallel execution
+	QueueSize    int          // Size of the event queue channel
+	WorkerSize   int          // Number of workers for parallel execution
+	BlockingMode BlockingMode // Blocking mode for event processing
 }
 
 // SeqEventBus is a sequential event bus implementation
@@ -135,6 +136,47 @@ func (tp *topicProcessor) close() {
 		tp.closed.Set(true)
 	})
 }
+func (tp *topicProcessor) blockProcess(event Event) error {
+	if tp.processors.IsEmpty() {
+		return nil
+	}
+	handlerProcessors := tp.filterHandlerProcessors()
+	if event.GetExecModel() == Seq {
+		for _, processor := range handlerProcessors {
+			err := tp.execute(event, processor)
+			if err != nil && event.GetErrorModel() == Stop {
+				return err
+			}
+		}
+	} else {
+		workerSize := tp.eventBus.option.WorkerSize
+		if workerSize <= 0 {
+			workerSize = len(handlerProcessors)
+		}
+		semaphore := make(chan struct{}, workerSize)
+		var wg sync.WaitGroup
+		var lastError error
+		var errMutex sync.Mutex
+		for _, processor := range handlerProcessors {
+			wg.Add(1)
+			go func(e Event, processor *handlerProcessor) {
+				defer wg.Done()
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+				err := tp.execute(e, processor)
+				if err != nil && event.GetErrorModel() == Stop {
+					errMutex.Lock()
+					lastError = err
+					errMutex.Unlock()
+					return
+				}
+			}(event, processor)
+		}
+		wg.Wait()
+		return lastError
+	}
+	return nil
+}
 
 // asyncProcess processes events asynchronously from the channel
 func (tp *topicProcessor) asyncProcess() {
@@ -150,7 +192,6 @@ func (tp *topicProcessor) asyncProcess() {
 			}
 			handlerProcessors := tp.filterHandlerProcessors()
 			if event.GetExecModel() == Seq {
-				// Sequential execution
 				for _, processor := range handlerProcessors {
 					err := tp.execute(event, processor)
 					if err != nil {
@@ -160,7 +201,6 @@ func (tp *topicProcessor) asyncProcess() {
 					}
 				}
 			} else {
-				// Parallel execution
 				workerSize := tp.eventBus.option.WorkerSize
 				if workerSize <= 0 {
 					workerSize = len(handlerProcessors)
@@ -191,8 +231,9 @@ func (tp *topicProcessor) asyncProcess() {
 // NewSeqEventBus creates a new sequential event bus with optional configuration
 func NewSeqEventBus(options ...SeqEventBusOption) *SeqEventBus {
 	option := SeqEventBusOption{
-		QueueSize:  100, // Default queue size
-		WorkerSize: 10,  // Default worker size for parallel execution
+		QueueSize:    DefaultQueueSize,  // Default queue size
+		WorkerSize:   DefaultWorkerSize, // Default worker size for parallel execution
+		BlockingMode: NoBlocking,        // Default blocking mode
 	}
 	if len(options) > 0 {
 		option = options[0]
@@ -244,31 +285,6 @@ func (s *SeqEventBus) UnRegisterFactoryFunc(topic string) (bool, error) {
 	return true, nil
 }
 
-// Publish publishes an event with the given parameters
-func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel ErrorModel, execModel ExecModel) (bool, error) {
-	if s.closed.Val() {
-		return false, EventBusClosedError
-	}
-	if topic == "" {
-		return false, TopicEmptyError
-	}
-	v := s.topics.Get(topic)
-	if v == nil {
-		return false, SubscriberEmptyError
-	}
-	processor := v.(*topicProcessor)
-	if processor.closed.Val() {
-		return false, EventBusClosedError
-	}
-	event := processor.factoryEvent(topic, params, errModel, execModel)
-	select {
-	case processor.ch <- event:
-		return true, nil
-	default:
-		return false, ChannelFullError
-	}
-}
-
 // initTopicProcessor initializes a topic processor for a new topic
 func (s *SeqEventBus) initTopicProcessor(topic string) *topicProcessor {
 	processor := &topicProcessor{
@@ -288,6 +304,44 @@ func (s *SeqEventBus) initTopicProcessor(topic string) *topicProcessor {
 	}
 	processor.startOnce.Do(processor.asyncProcess)
 	return processor
+}
+
+// Publish publishes an event with the given parameters
+func (s *SeqEventBus) Publish(topic string, params map[string]any, errModel ErrorModel, execModel ExecModel) (bool, error) {
+	if s.closed.Val() {
+		return false, EventBusClosedError
+	}
+	if topic == "" {
+		return false, TopicEmptyError
+	}
+	v := s.topics.Get(topic)
+	if v == nil {
+		return false, SubscriberEmptyError
+	}
+	processor := v.(*topicProcessor)
+	if processor.closed.Val() {
+		return false, EventBusClosedError
+	}
+	event := processor.factoryEvent(topic, params, errModel, execModel)
+	switch s.option.BlockingMode {
+	case BlockingPublish:
+		processor.ch <- event
+		return true, nil
+	case BlockingExecute:
+		select {
+		case processor.ch <- event:
+			return true, nil
+		default:
+			return true, processor.blockProcess(event)
+		}
+	default:
+		select {
+		case processor.ch <- event:
+			return true, nil
+		default:
+			return false, ChannelFullError
+		}
+	}
 }
 
 // PublishEvent publishes a pre-created event
@@ -310,16 +364,34 @@ func (s *SeqEventBus) PublishEvent(event Event) (bool, error) {
 	if processor.closed.Val() {
 		return false, EventBusClosedError
 	}
-	select {
-	case processor.ch <- event:
+	switch s.option.BlockingMode {
+	case BlockingPublish:
+		processor.ch <- event
 		return true, nil
+	case BlockingExecute:
+		select {
+		case processor.ch <- event:
+			return true, nil
+		default:
+			return true, processor.blockProcess(event)
+		}
 	default:
-		return false, ChannelFullError
+		select {
+		case processor.ch <- event:
+			return true, nil
+		default:
+			return false, ChannelFullError
+		}
 	}
 }
 
 // Subscribe registers an event handler for a topic
-func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, errorFunc ErrorFunc, recoverFunc RecoverFunc, priorities ...Priority) (*SeqEventBusSubscriber, error) {
+func (s *SeqEventBus) Subscribe(topic string, handlerFunc HandlerFunc, priorities ...Priority) (*SeqEventBusSubscriber, error) {
+	return s.SubscribeWithRecover(topic, handlerFunc, nil, nil, priorities...)
+}
+
+// SubscribeWithRecover registers an event handler for a topic with optional error and recover functions
+func (s *SeqEventBus) SubscribeWithRecover(topic string, handlerFunc HandlerFunc, errorFunc ErrorFunc, recoverFunc RecoverFunc, priorities ...Priority) (*SeqEventBusSubscriber, error) {
 	if s.closed.Val() {
 		return nil, EventBusClosedError
 	}

@@ -21,7 +21,7 @@ func TestSeqEventBus_PublishSubscribe(t *testing.T) {
 		subscriber, err := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler1:" + e.GetData()["message"].(string)
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err)
 		t.AssertNE(subscriber, nil)
 
@@ -52,14 +52,14 @@ func TestSeqEventBus_MultipleSubscribers(t *testing.T) {
 		_, err1 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler1:" + e.GetData()["message"].(string)
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err1)
 
 		// 订阅者2
 		_, err2 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler2:" + e.GetData()["message"].(string)
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err2)
 
 		// 发布事件
@@ -98,14 +98,14 @@ func TestSeqEventBus_Priority(t *testing.T) {
 			time.Sleep(10 * time.Millisecond) // 模拟处理时间
 			result <- "low"
 			return nil
-		}, nil, nil, gevent.PriorityLow)
+		}, gevent.PriorityLow)
 		t.AssertNil(err1)
 
 		// 订阅者2（高优先级）
 		_, err2 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "high"
 			return nil
-		}, nil, nil, gevent.PriorityHigh)
+		}, gevent.PriorityHigh)
 		t.AssertNil(err2)
 
 		// 发布事件
@@ -144,7 +144,7 @@ func TestSeqEventBus_ParallelExecution(t *testing.T) {
 			time.Sleep(100 * time.Millisecond) // 模拟耗时操作
 			result <- "handler1"
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err1)
 
 		// 订阅者2
@@ -152,7 +152,7 @@ func TestSeqEventBus_ParallelExecution(t *testing.T) {
 			time.Sleep(100 * time.Millisecond) // 模拟耗时操作
 			result <- "handler2"
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err2)
 
 		// 发布并行执行的事件
@@ -194,14 +194,14 @@ func TestSeqEventBus_ErrorHandling_Stop(t *testing.T) {
 		_, err1 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler1"
 			return gevent.EventBusClosedError // 返回错误
-		}, nil, nil)
+		})
 		t.AssertNil(err1)
 
 		// 订阅者2（正常）
 		_, err2 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler2"
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err2)
 
 		// 发布事件，使用Stop错误模式
@@ -239,14 +239,14 @@ func TestSeqEventBus_ErrorHandling_Ignore(t *testing.T) {
 		_, err1 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler1"
 			return gevent.EventBusClosedError // 返回错误
-		}, nil, nil)
+		})
 		t.AssertNil(err1)
 
 		// 订阅者2（正常）
 		_, err2 := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler2"
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err2)
 
 		// 发布事件，使用Ignore错误模式
@@ -283,7 +283,7 @@ func TestSeqEventBus_Unsubscribe(t *testing.T) {
 		subscriber, err := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler1:" + e.GetData()["message"].(string)
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err)
 
 		// 取消订阅
@@ -314,7 +314,7 @@ func TestSeqEventBus_PublishEvent(t *testing.T) {
 		_, err := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- e.GetData()["message"].(string)
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err)
 
 		// 创建并发布自定义事件
@@ -360,7 +360,7 @@ func TestSeqEventBus_FactoryFunc(t *testing.T) {
 		_, err = bus.Subscribe("test.topic", func(e gevent.Event) error {
 			result <- "handler:" + e.GetData()["message"].(string)
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err)
 
 		// 发布事件
@@ -393,7 +393,7 @@ func TestSeqEventBus_Close(t *testing.T) {
 		// 订阅事件
 		_, err := bus.Subscribe("test.topic", func(e gevent.Event) error {
 			return nil
-		}, nil, nil)
+		})
 		t.AssertNil(err)
 
 		// 关闭事件总线
