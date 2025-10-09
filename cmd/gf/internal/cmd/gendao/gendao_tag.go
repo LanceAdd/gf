@@ -60,6 +60,7 @@ CONFIGURATION SUPPORT
 	CGenDaoBriefGJsonSupport      = `use gJsonSupport to use *gjson.Json instead of string for generated json fields of tables`
 	CGenDaoBriefImportPrefix      = `custom import prefix for generated go files`
 	CGenDaoBriefDaoPath           = `directory path for storing generated dao files under path`
+	CGenDaoBriefTablePath         = `directory path for storing generated table files under path`
 	CGenDaoBriefDoPath            = `directory path for storing generated do files under path`
 	CGenDaoBriefEntityPath        = `directory path for storing generated entity files under path`
 	CGenDaoBriefOverwriteDao      = `overwrite all dao files both inside/outside internal folder`
@@ -98,6 +99,7 @@ generated json tag case for model struct, cases are as follows:
 	tplVarTableNameCamelLowerCase = `TplTableNameCamelLowerCase`
 	tplVarTableSharding           = `TplTableSharding`
 	tplVarTableShardingPrefix     = `TplTableShardingPrefix`
+	tplVarTableFields             = `TplTableFields`
 	tplVarPackageImports          = `TplPackageImports`
 	tplVarImportPrefix            = `TplImportPrefix`
 	tplVarStructDefine            = `TplStructDefine`
@@ -126,6 +128,7 @@ func init() {
 		`CGenDaoBriefStdTime`:            CGenDaoBriefStdTime,
 		`CGenDaoBriefWithTime`:           CGenDaoBriefWithTime,
 		`CGenDaoBriefDaoPath`:            CGenDaoBriefDaoPath,
+		`CGenDaoBriefTablePath`:          CGenDaoBriefTablePath,
 		`CGenDaoBriefDoPath`:             CGenDaoBriefDoPath,
 		`CGenDaoBriefEntityPath`:         CGenDaoBriefEntityPath,
 		`CGenDaoBriefGJsonSupport`:       CGenDaoBriefGJsonSupport,
