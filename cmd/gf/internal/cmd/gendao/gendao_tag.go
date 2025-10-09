@@ -70,6 +70,7 @@ CONFIGURATION SUPPORT
 	CGenDaoBriefNoJsonTag         = `no json tag will be added for each field`
 	CGenDaoBriefNoModelComment    = `no model comment will be added for each field`
 	CGenDaoBriefClear             = `delete all generated go files that do not exist in database`
+	CGenDaoBriefNoTable           = `do not generate table files`
 	CGenDaoBriefTypeMapping       = `custom local type mapping for generated struct attributes relevant to fields of table`
 	CGenDaoBriefFieldMapping      = `custom local type mapping for generated struct attributes relevant to specific fields of table`
 	CGenDaoBriefShardingPattern   = `sharding pattern for table name, e.g. "users_?" will be replace tables "users_001,users_002,..." to "users" dao`
@@ -140,6 +141,7 @@ func init() {
 		`CGenDaoBriefNoJsonTag`:          CGenDaoBriefNoJsonTag,
 		`CGenDaoBriefNoModelComment`:     CGenDaoBriefNoModelComment,
 		`CGenDaoBriefClear`:              CGenDaoBriefClear,
+		`CGenDaoBriefNoTable`:            CGenDaoBriefNoTable,
 		`CGenDaoBriefTypeMapping`:        CGenDaoBriefTypeMapping,
 		`CGenDaoBriefFieldMapping`:       CGenDaoBriefFieldMapping,
 		`CGenDaoBriefShardingPattern`:    CGenDaoBriefShardingPattern,
