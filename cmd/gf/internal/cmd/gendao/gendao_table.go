@@ -27,10 +27,13 @@ import (
 // generateTable generates dao files for given tables.
 func generateTable(ctx context.Context, in CGenDaoInternalInput) {
 	dirPathTable := gfile.Join(in.Path, in.TablePath)
-	in.genItems.AppendDirPath(dirPathTable)
 	if !in.GenTable {
+		if gfile.Exists(dirPathTable) {
+			in.genItems.AppendDirPath(dirPathTable)
+		}
 		return
 	}
+	in.genItems.AppendDirPath(dirPathTable)
 	for i := 0; i < len(in.TableNames); i++ {
 		var (
 			realTableName = in.TableNames[i]
