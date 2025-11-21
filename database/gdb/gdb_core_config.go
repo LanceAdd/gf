@@ -139,6 +139,10 @@ type ConfigNode struct {
 	// TimeMaintainDisabled controls whether automatic time maintenance is disabled
 	// Optional field
 	TimeMaintainDisabled bool `json:"timeMaintainDisabled"`
+
+	// TenantIdField specifies the field name for tenant id
+	// Optional field
+	TenantIdField string `json:"TenantIdField"`
 }
 
 type Role string
