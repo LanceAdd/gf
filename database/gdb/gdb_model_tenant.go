@@ -16,9 +16,9 @@ import (
 type TenantValueType string
 
 const (
-	ArrayOrSliceType TenantValueType = "ArrayOrSlice"
+	ArrayOrSliceType TenantValueType = "ArrayOrSliceType"
 	BaseType         TenantValueType = "BaseType"
-	NilType          TenantValueType = "Nil"
+	NullType         TenantValueType = "NilType"
 )
 const (
 	CtxKeyForTenantIdField = "CtxKeyForTenantIdField"
@@ -82,7 +82,7 @@ func (tm *TenantMaintainer) AppendTenantCondition(ctx context.Context) {
 			}
 			return true
 		})
-	case NilType:
+	case NullType:
 		tenantCondition.Iterator(func(k int, v string) bool {
 			tm.WhereNull(v)
 			return true
@@ -117,7 +117,7 @@ func (tm *TenantMaintainer) getWhereConditionForTenant(ctx context.Context) (*ga
 		tableMatch, _ := gregex.MatchString(`(.+?) [A-Z]+ JOIN`, tm.tables)
 		if c := tm.getConditionOfTableStringForTenant(ctx, tableMatch[1], tenantIdField, tenantValueType); c != "" {
 			conditionArray.Append(c)
-			if tenantValueType != NilType {
+			if tenantValueType != NullType {
 				argArray.Append(tenantIdValue)
 			}
 		}
@@ -126,7 +126,7 @@ func (tm *TenantMaintainer) getWhereConditionForTenant(ctx context.Context) (*ga
 			for _, match := range tableMatches {
 				if c := tm.getConditionOfTableStringForTenant(ctx, match[1], tenantIdField, tenantValueType); c != "" {
 					conditionArray.Append(c)
-					if tenantValueType != NilType {
+					if tenantValueType != NullType {
 						argArray.Append(tenantIdValue)
 					}
 				}
@@ -137,7 +137,7 @@ func (tm *TenantMaintainer) getWhereConditionForTenant(ctx context.Context) (*ga
 		for _, s := range gstr.SplitAndTrim(tm.tables, ",") {
 			if c := tm.getConditionOfTableStringForTenant(ctx, s, tenantIdField, tenantValueType); c != "" {
 				conditionArray.Append(c)
-				if tenantValueType != NilType {
+				if tenantValueType != NullType {
 					argArray.Append(tenantIdValue)
 				}
 			}
@@ -149,7 +149,7 @@ func (tm *TenantMaintainer) getWhereConditionForTenant(ctx context.Context) (*ga
 
 func (tm *TenantMaintainer) getTenantValueType(value any) TenantValueType {
 	if value == nil {
-		return NilType
+		return NullType
 	}
 	reflectInfo := reflection.OriginValueAndKind(value)
 	switch reflectInfo.OriginKind {
