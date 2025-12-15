@@ -15,16 +15,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/contrib/drivers/mysql/v2"
+	"github.com/seata/seata-go/pkg/client"
+	"github.com/seata/seata-go/pkg/protocol/branch"
+	"github.com/seata/seata-go/pkg/rm"
+
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/test/gtest"
-	"github.com/seata/seata-go/pkg/client"
-	"github.com/seata/seata-go/pkg/protocol/branch"
-	"github.com/seata/seata-go/pkg/rm"
+
+	"github.com/gogf/gf/contrib/drivers/mysql/v2"
 )
 
 // init 注册 Seata MySQL 驱动
