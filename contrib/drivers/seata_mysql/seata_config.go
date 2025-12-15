@@ -7,12 +7,10 @@
 package seata_mysql
 
 import (
-	"time"
-
 	"github.com/seata/seata-go/pkg/protocol/branch"
 )
 
-// Config Seata 配置结构
+// Config Seata AT 模式配置结构
 type Config struct {
 	// Enabled 是否启用 Seata
 	Enabled bool `json:"enabled" yaml:"enabled"`
@@ -23,14 +21,8 @@ type Config struct {
 	// TxServiceGroup 事务服务组
 	TxServiceGroup string `json:"txServiceGroup" yaml:"txServiceGroup"`
 
-	// Mode 事务模式: AT 或 XA
-	Mode string `json:"mode" yaml:"mode"`
-
 	// AT AT 模式配置
 	AT ATConfig `json:"at" yaml:"at"`
-
-	// XA XA 模式配置
-	XA XAConfig `json:"xa" yaml:"xa"`
 
 	// Registry 注册中心配置
 	Registry RegistryConfig `json:"registry" yaml:"registry"`
@@ -52,15 +44,6 @@ type ATConfig struct {
 
 	// EnableAsyncCommit 启用异步提交（异步删除 undo log）
 	EnableAsyncCommit bool `json:"enableAsyncCommit" yaml:"enableAsyncCommit"`
-}
-
-// XAConfig XA 模式配置
-type XAConfig struct {
-	// BranchExecutionTimeout 分支执行超时时间（毫秒）
-	BranchExecutionTimeout int64 `json:"branchExecutionTimeout" yaml:"branchExecutionTimeout"`
-
-	// ConnectionTimeout 连接超时时间（毫秒）
-	ConnectionTimeout int64 `json:"connectionTimeout" yaml:"connectionTimeout"`
 }
 
 // RegistryConfig 注册中心配置
@@ -111,17 +94,12 @@ func DefaultConfig() *Config {
 		Enabled:         false,
 		ApplicationID:   "gf-app",
 		TxServiceGroup:  "default_tx_group",
-		Mode:            "AT",
 		EnableAutoProxy: true,
 		AT: ATConfig{
 			UndoLogSerialization: "jackson",
 			UndoLogTable:         "undo_log",
 			OnlyCarePrimaryKey:   false,
 			EnableAsyncCommit:    true, // 默认启用异步提交
-		},
-		XA: XAConfig{
-			BranchExecutionTimeout: 60000,
-			ConnectionTimeout:      30000,
 		},
 		Registry: RegistryConfig{
 			Type: "file",
@@ -132,26 +110,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-// GetBranchType 根据模式获取分支类型
+// GetBranchType 获取分支类型（始终返回 AT）
 func (c *Config) GetBranchType() branch.BranchType {
-	switch c.Mode {
-	case "XA":
-		return branch.BranchTypeXA
-	case "AT":
-		return branch.BranchTypeAT
-	case "TCC":
-		return branch.BranchTypeTCC
-	case "SAGA":
-		return branch.BranchTypeSAGA
-	default:
-		return branch.BranchTypeAT
-	}
-}
-
-// GetTimeout 获取超时时间
-func (c *Config) GetTimeout() time.Duration {
-	if c.Mode == "XA" {
-		return time.Duration(c.XA.BranchExecutionTimeout) * time.Millisecond
-	}
-	return 60 * time.Second
+	return branch.BranchTypeAT
 }

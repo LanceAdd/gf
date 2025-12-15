@@ -21,16 +21,10 @@ import (
 	"github.com/gogf/gf/v2/os/glog"
 )
 
-// Resource Seata 数据库资源
+// Resource Seata AT 模式数据库资源
 type Resource struct {
 	// resourceID 资源 ID
 	resourceID string
-
-	// branchType 分支类型
-	branchType branch.BranchType
-
-	// dbType 数据库类型
-	dbType types.DBType
 
 	// db 原始数据库连接
 	db *sql.DB
@@ -55,23 +49,17 @@ type Resource struct {
 
 	// resourceCache 资源缓存（用于实现 ResourceManager 接口）
 	resourceCache sync.Map
-
-	// 用于 XA 模式连接保持
-	keeper       sync.Map
-	shouldBeHeld bool
 }
 
-// NewResource 创建新的资源
-func NewResource(resourceID string, branchType branch.BranchType, dbType types.DBType, db *sql.DB, gfCore *gdb.Core, config *Config) *Resource {
-	return NewResourceWithDB(resourceID, branchType, dbType, db, gfCore, nil, config)
+// NewResource 创建新的 AT 模式资源
+func NewResource(resourceID string, db *sql.DB, gfCore *gdb.Core, config *Config) *Resource {
+	return NewResourceWithDB(resourceID, db, gfCore, nil, config)
 }
 
-// NewResourceWithDB 创建新的资源
-func NewResourceWithDB(resourceID string, branchType branch.BranchType, dbType types.DBType, db *sql.DB, gfCore *gdb.Core, _ gdb.DB, config *Config) *Resource {
+// NewResourceWithDB 创建新的 AT 模式资源
+func NewResourceWithDB(resourceID string, db *sql.DB, gfCore *gdb.Core, _ gdb.DB, config *Config) *Resource {
 	resource := &Resource{
 		resourceID: resourceID,
-		branchType: branchType,
-		dbType:     dbType,
 		db:         db,
 		gfCore:     gfCore,
 		// underlyingDB 参数已废弃，不再使用
@@ -103,9 +91,9 @@ func (r *Resource) GetResourceId() string {
 	return r.resourceID
 }
 
-// GetBranchType 获取分支类型
+// GetBranchType 获取分支类型（始终返回 AT）
 func (r *Resource) GetBranchType() branch.BranchType {
-	return r.branchType
+	return branch.BranchTypeAT
 }
 
 // GetDB 获取原始数据库连接
@@ -118,53 +106,14 @@ func (r *Resource) GetGFCore() *gdb.Core {
 	return r.gfCore
 }
 
-// GetDBType 获取数据库类型
+// GetDBType 获取数据库类型（始终返回 MySQL）
 func (r *Resource) GetDBType() types.DBType {
-	return r.dbType
+	return types.DBTypeMySQL
 }
 
 // GetConfig 获取配置
 func (r *Resource) GetConfig() *Config {
 	return r.config
-}
-
-// IsShouldBeHeld 是否需要保持连接（XA 模式专用）
-func (r *Resource) IsShouldBeHeld() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.shouldBeHeld
-}
-
-// SetShouldBeHeld 设置是否需要保持连接
-func (r *Resource) SetShouldBeHeld(shouldBeHeld bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.shouldBeHeld = shouldBeHeld
-}
-
-// Hold 保持连接（XA 模式专用）
-func (r *Resource) Hold(xaBranchID string, conn interface{}) error {
-	_, exist := r.keeper.Load(xaBranchID)
-	if !exist {
-		r.keeper.Store(xaBranchID, conn)
-		return nil
-	}
-	return nil
-}
-
-// Release 释放连接（XA 模式专用）
-func (r *Resource) Release(xaBranchID string) {
-	r.keeper.Delete(xaBranchID)
-}
-
-// Lookup 查找连接（XA 模式专用）
-func (r *Resource) Lookup(xaBranchID string) (interface{}, bool) {
-	return r.keeper.Load(xaBranchID)
-}
-
-// GetKeeper 获取连接保持器
-func (r *Resource) GetKeeper() *sync.Map {
-	return &r.keeper
 }
 
 // BuildResourceID 构建资源 ID

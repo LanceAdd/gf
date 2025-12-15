@@ -8,7 +8,7 @@ package seata_mysql
 
 const (
 	// Driver name
-	DriverName = "seata-mysql"
+	DriverName = "seata-at-mysql"
 
 	// Resource ID format
 	ResourceIDFormat = "seata-at-mysql:%s@%s:%s/%s"

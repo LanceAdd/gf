@@ -8,7 +8,6 @@ package seata_mysql
 
 import (
 	"github.com/seata/seata-go/pkg/datasource/sql/datasource"
-	"github.com/seata/seata-go/pkg/datasource/sql/types"
 	"github.com/seata/seata-go/pkg/protocol/branch"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -83,8 +82,6 @@ func (d *DriverAT) New(core *gdb.Core, node *gdb.ConfigNode) (gdb.DB, error) {
 	// 4. 创建 Seata 资源
 	resource := NewResource(
 		resourceID,
-		branch.BranchTypeAT,
-		types.DBTypeMySQL,
 		sqlDB,
 		core,
 		d.config,

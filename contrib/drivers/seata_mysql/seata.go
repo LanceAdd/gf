@@ -4,7 +4,7 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-// Package seata 提供 GF 框架的 Seata 分布式事务支持
+// Package seata_mysql 提供 GF 框架的 Seata AT 模式分布式事务支持
 package seata_mysql
 
 import (
@@ -39,7 +39,7 @@ var (
 	atInitOnce sync.Once
 )
 
-// Init 初始化 Seata
+// Init 初始化 Seata AT 模式
 func Init(config *Config) error {
 	if initialized {
 		return gerror.NewCode(gcode.CodeInvalidOperation, "Seata already initialized")
@@ -52,7 +52,7 @@ func Init(config *Config) error {
 	globalConfig = config
 	ctx := gctx.GetInitCtx()
 
-	glog.Info(ctx, "[Seata] Initializing Seata driver...")
+	glog.Info(ctx, "[Seata] Initializing Seata AT mode driver...")
 
 	// 1. 初始化 Seata 客户端配置
 	if err := initSeataClient(ctx, config); err != nil {
@@ -60,26 +60,17 @@ func Init(config *Config) error {
 	}
 
 	// 2. 初始化 AT 模式
-	if config.Mode == "AT" || config.Mode == "" {
-		if err := initATMode(ctx, config); err != nil {
-			return gerror.WrapCode(gcode.CodeInternalError, err, "failed to initialize AT mode")
-		}
+	if err := initATMode(ctx, config); err != nil {
+		return gerror.WrapCode(gcode.CodeInternalError, err, "failed to initialize AT mode")
 	}
 
-	// 3. 初始化 XA 模式
-	if config.Mode == "XA" {
-		if err := initXAMode(ctx, config); err != nil {
-			return gerror.WrapCode(gcode.CodeInternalError, err, "failed to initialize XA mode")
-		}
-	}
-
-	// 4. 注册驱动到 GF
-	if err := registerDrivers(ctx, config); err != nil {
-		return gerror.WrapCode(gcode.CodeInternalError, err, "failed to register drivers")
+	// 3. 注册驱动到 GF
+	if err := registerDriver(ctx, config); err != nil {
+		return gerror.WrapCode(gcode.CodeInternalError, err, "failed to register driver")
 	}
 
 	initialized = true
-	glog.Info(ctx, "[Seata] Seata driver initialized successfully")
+	glog.Info(ctx, "[Seata] Seata AT mode driver initialized successfully")
 
 	return nil
 }
@@ -162,38 +153,14 @@ func stringContains(s, substr string) bool {
 	return false
 }
 
-// initXAMode 初始化 XA 模式
-func initXAMode(ctx context.Context, config *Config) error {
-	glog.Info(ctx, "[Seata] Initializing XA mode...")
-
-	// 初始化 XA 模式
-	xaConfig := sql.XAConfig{}
-	sql.InitXA(xaConfig)
-
-	glog.Info(ctx, "[Seata] XA mode initialized")
-	return nil
-}
-
-// registerDrivers 注册驱动
-func registerDrivers(ctx context.Context, config *Config) error {
-
-	// 注册 AT 模式驱动
-	if config.Mode == "AT" || config.Mode == "" {
-		glog.Info(ctx, "[Seata] Registering AT mode driver...")
-		driver := NewDriverAT(config)
-		if err := gdb.Register(DriverNameATMySQL, driver); err != nil {
-			return fmt.Errorf("failed to register AT driver: %w", err)
-		}
-		glog.Info(ctx, "[Seata] AT mode driver registered")
+// registerDriver 注册 AT 模式驱动
+func registerDriver(ctx context.Context, config *Config) error {
+	glog.Info(ctx, "[Seata] Registering AT mode driver...")
+	driver := NewDriverAT(config)
+	if err := gdb.Register(DriverNameATMySQL, driver); err != nil {
+		return fmt.Errorf("failed to register AT driver: %w", err)
 	}
-
-	// 注册 XA 模式驱动
-	if config.Mode == "XA" {
-		glog.Info(ctx, "[Seata] Registering XA mode driver...")
-		// XA 模式将在阶段四实现
-		glog.Warning(ctx, "[Seata] XA mode driver not implemented yet")
-	}
-
+	glog.Info(ctx, "[Seata] AT mode driver registered")
 	return nil
 }
 
