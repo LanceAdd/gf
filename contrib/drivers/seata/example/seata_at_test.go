@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/seata/seata-go/pkg/tm"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/test/gtest"
-	"github.com/seata/seata-go/pkg/tm"
 )
 
 // TestSeataAT_BasicTransfer AT模式基础转账测试

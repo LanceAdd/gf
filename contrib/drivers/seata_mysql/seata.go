@@ -14,17 +14,18 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
+
+	"github.com/seata/seata-go/pkg/client"
+	"github.com/seata/seata-go/pkg/datasource/sql"
+	"github.com/seata/seata-go/pkg/datasource/sql/undo"
+	"github.com/seata/seata-go/pkg/protocol/branch"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/glog"
-
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/seata/seata-go/pkg/client"
-	"github.com/seata/seata-go/pkg/datasource/sql"
-	"github.com/seata/seata-go/pkg/datasource/sql/undo"
-	"github.com/seata/seata-go/pkg/protocol/branch"
 )
 
 var (

@@ -13,13 +13,14 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/seata/seata-go/pkg/tm"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/util/guid"
 	"github.com/gogf/gf/v2/util/gutil"
-	"github.com/seata/seata-go/pkg/tm"
 )
 
 // SeataDB Seata 数据库包装对象

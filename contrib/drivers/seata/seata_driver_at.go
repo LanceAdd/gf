@@ -7,13 +7,14 @@
 package seata
 
 import (
+	"github.com/seata/seata-go/pkg/datasource/sql/datasource"
+	"github.com/seata/seata-go/pkg/protocol/branch"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/glog"
-	"github.com/seata/seata-go/pkg/datasource/sql/datasource"
-	"github.com/seata/seata-go/pkg/protocol/branch"
 )
 
 const (

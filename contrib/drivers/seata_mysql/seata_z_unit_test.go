@@ -10,11 +10,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/seata/seata-go/pkg/datasource/sql/types"
+	"github.com/seata/seata-go/pkg/protocol/branch"
+
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/test/gtest"
-	"github.com/seata/seata-go/pkg/datasource/sql/types"
-	"github.com/seata/seata-go/pkg/protocol/branch"
 )
 
 // Test_Config tests configuration functionality

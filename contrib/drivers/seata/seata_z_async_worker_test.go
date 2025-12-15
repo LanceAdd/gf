@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/seata/seata-go/pkg/protocol/branch"
 	"github.com/seata/seata-go/pkg/rm"
+
+	"github.com/gogf/gf/v2/test/gtest"
 )
 
 func TestAsyncWorker_StartStop(t *testing.T) {

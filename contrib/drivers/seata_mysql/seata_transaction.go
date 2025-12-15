@@ -11,13 +11,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/seata/seata-go/pkg/protocol/branch"
+	"github.com/seata/seata-go/pkg/rm"
+	"github.com/seata/seata-go/pkg/tm"
+
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/os/glog"
-	"github.com/seata/seata-go/pkg/protocol/branch"
-	"github.com/seata/seata-go/pkg/rm"
-	"github.com/seata/seata-go/pkg/tm"
 )
 
 // SeataTX Seata 事务对象

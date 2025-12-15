@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogf/gf/v2/os/glog"
 	"github.com/seata/seata-go/pkg/rm"
+
+	"github.com/gogf/gf/v2/os/glog"
 )
 
 // AsyncWorkerConfig 异步工作器配置

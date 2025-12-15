@@ -3,8 +3,9 @@ package seata_mysql
 import (
 	"testing"
 
-	"github.com/gogf/gf/contrib/drivers/mysql/v2"
 	"github.com/gogf/gf/v2/test/gtest"
+
+	"github.com/gogf/gf/contrib/drivers/mysql/v2"
 )
 
 // TestDriverAT_New 测试 AT 模式驱动的创建

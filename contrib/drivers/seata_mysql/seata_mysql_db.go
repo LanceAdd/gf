@@ -13,12 +13,14 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/gogf/gf/contrib/drivers/mysql/v2"
+	"github.com/seata/seata-go/pkg/tm"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/util/guid"
-	"github.com/seata/seata-go/pkg/tm"
+
+	"github.com/gogf/gf/contrib/drivers/mysql/v2"
 )
 
 // SeataDB Seata 数据库包装对象

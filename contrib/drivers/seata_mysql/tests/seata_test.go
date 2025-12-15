@@ -15,13 +15,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/os/gctx"
-	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/seata/seata-go/pkg/protocol/branch"
 	"github.com/seata/seata-go/pkg/rm"
 	"github.com/seata/seata-go/pkg/tm"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/test/gtest"
 
 	seataMysql "github.com/gogf/gf/contrib/drivers/seata_mysql"
 )

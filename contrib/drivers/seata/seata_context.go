@@ -10,8 +10,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/seata/seata-go/pkg/tm"
+
+	"github.com/gogf/gf/v2/database/gdb"
 )
 
 // WithGlobalTransaction 在 context 中注入全局事务
