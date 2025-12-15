@@ -1,0 +1,20 @@
+# 测试生成的文件
+*.test
+*.test.exe
+*.out
+*.log
+*.txt
+
+# 临时文件
+*_temp.md
+*_tmp.md
+
+# IDE 文件
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 覆盖率报告
+coverage.out
+coverage.html
