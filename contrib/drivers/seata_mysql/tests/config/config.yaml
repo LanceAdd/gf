@@ -1,0 +1,74 @@
+# Seata MySQL Driver Test Configuration
+server:
+  address: ":8000"
+  
+logger:
+  level: "all"
+  stdout: true
+  
+database:
+  default:
+    type: "mysql"
+    host: "127.0.0.1"
+    port: "3306"
+    user: "root"
+    pass: "123456"
+    name: "seata_test"
+    charset: "utf8mb4"
+    protocol: "tcp"
+    maxIdle: "10"
+    maxOpen: "100"
+    maxLifetime: "30"
+    debug: true
+
+# Seata Configuration
+seata:
+  enabled: true
+  application_id: "seata-mysql-test"
+  tx_service_group: "default_tx_group"
+  
+  # Registry Configuration
+  registry:
+    type: "file"
+    file:
+      name: "file.conf"
+      
+  # Config Configuration  
+  config:
+    type: "file"
+    file:
+      name: "file.conf"
+      
+  # Service Configuration
+  service:
+    vgroup_mapping:
+      default_tx_group: "default"
+    grouplist:
+      default: "127.0.0.1:8091"
+    enable_degrade: false
+    disable_global_transaction: false
+    
+  # Client Configuration
+  client:
+    rm:
+      async_commit_buffer_limit: 10000
+      report_retry_count: 5
+      table_meta_check_enable: false
+      report_success_enable: false
+      saga_branch_register_enable: false
+      lock:
+        retry_interval: 10
+        retry_times: 30
+        retry_policy_branch_rollback_on_conflict: true
+    tm:
+      commit_retry_count: 5
+      rollback_retry_count: 5
+      default_global_transaction_timeout: 60000
+      degrade_check: false
+      degrade_check_period: 2000
+      degrade_check_allow_times: 10
+    undo:
+      data_validation: true
+      log_serialization: "jackson"
+      log_table: "undo_log"
+      only_care_update_columns: true
