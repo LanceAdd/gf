@@ -51,8 +51,6 @@ func (d *DriverAT) New(core *gdb.Core, node *gdb.ConfigNode) (gdb.DB, error) {
 		return mysqlDriver.New(core, node)
 	}
 
-	glog.Infof(ctx, "[Seata] Initializing AT mode driver for: %s", node.Name)
-
 	// 1. 创建 MySQL Driver 实例
 	mysqlDriver := mysql.New()
 	mysqlDB, err := mysqlDriver.New(core, node)
@@ -77,7 +75,6 @@ func (d *DriverAT) New(core *gdb.Core, node *gdb.ConfigNode) (gdb.DB, error) {
 
 	// 3. 构建资源 ID
 	resourceID := BuildResourceID(node)
-	glog.Debugf(ctx, "[Seata] Resource ID: %s", resourceID)
 
 	// 4. 创建 Seata 资源
 	resource := NewResource(
@@ -87,16 +84,11 @@ func (d *DriverAT) New(core *gdb.Core, node *gdb.ConfigNode) (gdb.DB, error) {
 		d.config,
 	)
 
-	// 5. 注册资源到 Seata RM
+	// 5. 注册资源到 Seata RM（如果已初始化）
 	if err = d.registerResource(resource); err != nil {
-		return nil, gerror.WrapCodef(
-			gcode.CodeDbOperationError,
-			err,
-			"failed to register resource to Seata RM",
-		)
+		// 注册失败也不影响驱动创建，只是不会有分布式事务功能
+		// 这允许在精简模式下运行
 	}
-
-	glog.Infof(ctx, "[Seata] AT mode driver initialized successfully for: %s", node.Name)
 
 	// 6. 返回嵌入了 mysql.Driver 的 SeataDB
 	// 关键：类型断言获取 mysql.Driver
@@ -113,13 +105,21 @@ func (d *DriverAT) New(core *gdb.Core, node *gdb.ConfigNode) (gdb.DB, error) {
 }
 
 // registerResource 注册资源到 Seata RM
-func (d *DriverAT) registerResource(resource *Resource) error {
+// 如果在精简模式下（未初始化 Seata），跳过注册
+func (d *DriverAT) registerResource(resource *Resource) (err error) {
+	// 使用 defer+recover 捕获 panic，因为 Seata-Go 在未初始化时会 panic
+	defer func() {
+		if r := recover(); r != nil {
+			// 精简模式：Seata 未初始化，跳过注册
+			err = nil
+		}
+	}()
+
 	rm := datasource.GetDataSourceManager(branch.BranchTypeAT)
 	if rm == nil {
-		return gerror.NewCode(
-			gcode.CodeInternalError,
-			"AT mode resource manager not initialized, please call seata.InitAT() first",
-		)
+		// 精简模式：未初始化 Seata，跳过资源注册
+		// 驱动仍然可以正常工作，但不会有分布式事务功能
+		return nil
 	}
 	return rm.RegisterResource(resource)
 }

@@ -11,101 +11,42 @@ import (
 )
 
 // Config Seata AT 模式配置结构
+//
+// 注意：本配置仅用于 GF 驱动层的控制，不用于 Seata 客户端配置。
+// Seata 客户端配置请通过环境变量 SEATA_GO_CONFIG_PATH 指定配置文件。
 type Config struct {
-	// Enabled 是否启用 Seata
+	// Enabled 是否启用 Seata AT 模式
+	// false: 使用原生 MySQL 驱动，不启用分布式事务
+	// true: 启用 Seata AT 模式分布式事务
 	Enabled bool `json:"enabled" yaml:"enabled"`
 
-	// ApplicationID 应用 ID
-	ApplicationID string `json:"applicationId" yaml:"applicationId"`
-
-	// TxServiceGroup 事务服务组
-	TxServiceGroup string `json:"txServiceGroup" yaml:"txServiceGroup"`
-
-	// AT AT 模式配置
+	// AT AT 模式特定配置（仅用于精简模式下的 undo log 配置）
 	AT ATConfig `json:"at" yaml:"at"`
-
-	// Registry 注册中心配置
-	Registry RegistryConfig `json:"registry" yaml:"registry"`
-
-	// EnableAutoProxy 是否自动代理数据源
-	EnableAutoProxy bool `json:"enableAutoProxy" yaml:"enableAutoProxy"`
 }
 
 // ATConfig AT 模式配置
+//
+// 注意：这些配置仅在精简模式（未设置 SEATA_GO_CONFIG_PATH）下使用。
+// 完整模式下，所有配置从 seatago.yml 读取。
 type ATConfig struct {
-	// UndoLogSerialization Undo Log 序列化方式
-	UndoLogSerialization string `json:"undoLogSerialization" yaml:"undoLogSerialization"`
-
-	// UndoLogTable Undo Log 表名
-	UndoLogTable string `json:"undoLogTable" yaml:"undoLogTable"`
-
 	// OnlyCarePrimaryKey 是否只关注主键
+	// false: 记录所有列的变更（推荐，更安全）
+	// true: 只记录主键列的变更（性能更好，但可能影响回滚准确性）
 	OnlyCarePrimaryKey bool `json:"onlyCarePrimaryKey" yaml:"onlyCarePrimaryKey"`
 
 	// EnableAsyncCommit 启用异步提交（异步删除 undo log）
+	// true: 事务提交后异步删除 undo log（推荐，性能更好）
+	// false: 事务提交时同步删除 undo log
 	EnableAsyncCommit bool `json:"enableAsyncCommit" yaml:"enableAsyncCommit"`
-}
-
-// RegistryConfig 注册中心配置
-type RegistryConfig struct {
-	// Type 注册中心类型: nacos, eureka, consul, etcd, zk, sofa, redis, file
-	Type string `json:"type" yaml:"type"`
-
-	// FileConfig 文件注册中心配置
-	FileConfig FileRegistryConfig `json:"file" yaml:"file"`
-
-	// NacosConfig Nacos 配置
-	NacosConfig NacosRegistryConfig `json:"nacos" yaml:"nacos"`
-}
-
-// FileRegistryConfig 文件注册中心配置
-type FileRegistryConfig struct {
-	// Name 文件名
-	Name string `json:"name" yaml:"name"`
-}
-
-// NacosRegistryConfig Nacos 注册中心配置
-type NacosRegistryConfig struct {
-	// Application 应用名
-	Application string `json:"application" yaml:"application"`
-
-	// ServerAddr 服务地址
-	ServerAddr string `json:"serverAddr" yaml:"serverAddr"`
-
-	// Namespace 命名空间
-	Namespace string `json:"namespace" yaml:"namespace"`
-
-	// Group 分组
-	Group string `json:"group" yaml:"group"`
-
-	// Cluster 集群
-	Cluster string `json:"cluster" yaml:"cluster"`
-
-	// Username 用户名
-	Username string `json:"username" yaml:"username"`
-
-	// Password 密码
-	Password string `json:"password" yaml:"password"`
 }
 
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Enabled:         false,
-		ApplicationID:   "gf-app",
-		TxServiceGroup:  "default_tx_group",
-		EnableAutoProxy: true,
+		Enabled: false,
 		AT: ATConfig{
-			UndoLogSerialization: "jackson",
-			UndoLogTable:         "undo_log",
-			OnlyCarePrimaryKey:   false,
-			EnableAsyncCommit:    true, // 默认启用异步提交
-		},
-		Registry: RegistryConfig{
-			Type: "file",
-			FileConfig: FileRegistryConfig{
-				Name: "registry.conf",
-			},
+			OnlyCarePrimaryKey: false,
+			EnableAsyncCommit:  true,
 		},
 	}
 }

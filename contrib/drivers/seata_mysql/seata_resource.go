@@ -35,15 +35,6 @@ type Resource struct {
 	// config Seata 配置
 	config *Config
 
-	// asyncWorker 异步工作器（用于异步删除 undo log）
-	asyncWorker *AsyncWorker
-
-	// retryExecutor 重试执行器
-	retryExecutor *RetryExecutor
-
-	// fallbackManager 降级管理器
-	fallbackManager *FallbackManager
-
 	// mu 互斥锁
 	mu sync.RWMutex
 
@@ -62,28 +53,19 @@ func NewResourceWithDB(resourceID string, db *sql.DB, gfCore *gdb.Core, _ gdb.DB
 		resourceID: resourceID,
 		db:         db,
 		gfCore:     gfCore,
-		// underlyingDB 参数已废弃，不再使用
-		config: config,
+		config:     config,
 	}
-
-	// 创建并启动异步工作器
-	if config.AT.EnableAsyncCommit {
-		resource.asyncWorker = NewAsyncWorker(db, DefaultAsyncWorkerConfig())
-		resource.asyncWorker.Start()
-	}
-
-	// 创建重试执行器
-	resource.retryExecutor = NewRetryExecutor(DefaultRetryConfig())
-
-	// 创建降级管理器
-	resource.fallbackManager = NewFallbackManager(DefaultFallbackConfig())
 
 	return resource
 }
 
 // GetResourceGroupId 获取资源组 ID
+// 注意：这个值在完整模式下会从 seatago.yml 读取
+// 精简模式下返回默认值
 func (r *Resource) GetResourceGroupId() string {
-	return r.config.TxServiceGroup
+	// 返回默认的资源组 ID
+	// 完整模式下，Seata-Go 会使用配置文件中的 tx_service_group
+	return "default_tx_group"
 }
 
 // GetResourceId 获取资源 ID
@@ -131,18 +113,8 @@ func BuildResourceID(node *gdb.ConfigNode) string {
 func (r *Resource) BranchCommit(ctx context.Context, resource rm.BranchResource) (branch.BranchStatus, error) {
 	glog.Infof(ctx, "[Seata] Branch commit, XID=%s, BranchID=%d", resource.Xid, resource.BranchId)
 
-	// 如果启用了异步提交，使用异步工作器
-	if r.asyncWorker != nil {
-		err := r.asyncWorker.BranchCommit(resource)
-		if err != nil {
-			glog.Errorf(ctx, "[Seata] Failed to async commit: %v", err)
-			return branch.BranchStatusPhaseoneFailed, err
-		}
-		glog.Infof(ctx, "[Seata] Branch commit queued (async)")
-		return branch.BranchStatusPhasetwoCommitted, nil
-	}
-
-	// 同步删除 undo log
+	// 删除 undo log
+	// 注意：如果需要异步删除，应该使用 Seata-Go SDK 的 AsyncWorker
 	deleteSql := "DELETE FROM undo_log WHERE xid = ? AND branch_id = ?"
 	_, err := r.db.ExecContext(ctx, deleteSql, resource.Xid, resource.BranchId)
 	if err != nil {

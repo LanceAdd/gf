@@ -69,8 +69,6 @@ func (g *ImageGenerator) GenerateBeforeImage(
 	// Build SELECT SQL with FOR UPDATE to lock the rows
 	selectSQL := g.buildSelectSQL(tableName, condition)
 
-	glog.Debugf(ctx, "[Seata] GenerateBeforeImage SQL: %s, args: %v", selectSQL, args)
-
 	// Execute query
 	result, err := g.executeQuery(ctx, link, selectSQL, args)
 	if err != nil {
@@ -105,8 +103,6 @@ func (g *ImageGenerator) GenerateAfterImage(
 
 	// Build SELECT SQL using primary keys
 	selectSQL := g.buildSelectByPKSQL(tableName, pkName, len(pkValues))
-
-	glog.Debugf(ctx, "[Seata] GenerateAfterImage SQL: %s, pkValues: %v", selectSQL, pkValues)
 
 	// Execute query
 	result, err := g.executeQuery(ctx, link, selectSQL, pkValues)

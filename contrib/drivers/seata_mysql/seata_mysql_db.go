@@ -42,26 +42,39 @@ func (db *SeataDB) BeginWithOptions(ctx context.Context, opts gdb.TxOptions) (gd
 	// 检查是否在全局事务中
 	if !db.isInGlobalTransaction(ctx) {
 		// 不在全局事务中，使用原生 MySQL 事务
-		glog.Debug(ctx, "[Seata] Not in global transaction, using native MySQL transaction")
 		return db.Driver.BeginWithOptions(ctx, opts)
 	}
 
 	// 在全局事务中，创建 Seata 事务
-	glog.Debugf(ctx, "[Seata] In global transaction, XID: %s", tm.GetXID(ctx))
 	return db.beginSeataTransaction(ctx, opts)
 }
 
 // Transaction 执行事务
+//
+// 支持混合事务和嵌套事务：
+// 1. 如果已经在 SeataTX 中，使用嵌套事务（SAVEPOINT）
+// 2. 如果已经在原生 TX 中，直接执行（原生 TX 不支持嵌套）
+// 3. 如果不在事务中，根据是否在全局事务中创建 Seata 或原生事务
 func (db *SeataDB) Transaction(ctx context.Context, f func(ctx context.Context, tx gdb.TX) error) error {
-	// 检查是否在全局事务中
+	// 检查是否已经在事务中
+	existingTx := gdb.TXFromCtx(ctx, db.GetGroup())
+	if existingTx != nil {
+		// 已经在事务中，复用当前事务
+		if seataTx, ok := existingTx.(*SeataTX); ok {
+			// 当前是 SeataTX，使用嵌套事务（SAVEPOINT）
+			return seataTx.Transaction(ctx, f)
+		}
+		// 当前是原生 TX，直接执行（原生 TX 不支持嵌套）
+		return f(ctx, existingTx)
+	}
+
+	// 不在事务中，创建新事务
 	if !db.isInGlobalTransaction(ctx) {
 		// 不在全局事务中，使用原生 MySQL 事务
-		glog.Debug(ctx, "[Seata] Not in global transaction, using native MySQL transaction")
 		return db.Driver.Transaction(ctx, f)
 	}
 
 	// 在全局事务中，执行 Seata 事务
-	glog.Debugf(ctx, "[Seata] Executing Seata transaction, XID: %s", tm.GetXID(ctx))
 	return db.executeSeataTransaction(ctx, f)
 }
 
@@ -97,6 +110,27 @@ func (db *SeataDB) executeSeataTransaction(ctx context.Context, f func(ctx conte
 		return err
 	}
 
+	// 获取包含事务的 context
+	seataTx, ok := tx.(*SeataTX)
+	if !ok {
+		// 不是 SeataTX，使用原始逻辑
+		defer func() {
+			if r := recover(); r != nil {
+				_ = tx.Rollback()
+				panic(r)
+			}
+		}()
+
+		if err = f(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		return tx.Commit()
+	}
+
+	// 使用 SeataTX 的 context，它包含了事务对象
+	ctxWithTx := seataTx.GetCtx()
+
 	defer func() {
 		if r := recover(); r != nil {
 			_ = tx.Rollback()
@@ -104,7 +138,7 @@ func (db *SeataDB) executeSeataTransaction(ctx context.Context, f func(ctx conte
 		}
 	}()
 
-	if err = f(ctx, tx); err != nil {
+	if err = f(ctxWithTx, tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -144,8 +178,6 @@ func (db *SeataDB) DoUpdate(
 		return db.GetCore().DoUpdate(ctx, link, table, data, condition, args...)
 	}
 
-	glog.Debugf(ctx, "[Seata] Intercepting UPDATE on table: %s", table)
-
 	// 1. 生成 beforeImage
 	imageGen := NewImageGenerator(db.resource)
 	beforeImage, err := imageGen.GenerateBeforeImage(ctx, link, table, condition, args)
@@ -172,7 +204,6 @@ func (db *SeataDB) DoUpdate(
 		return nil, fmt.Errorf(ErrSaveUndoLog, table, err)
 	}
 
-	glog.Debugf(ctx, "[Seata] UPDATE intercepted successfully, rows affected: %d", len(beforeImage.Rows))
 	return result, nil
 }
 
@@ -188,8 +219,6 @@ func (db *SeataDB) DoInsert(
 	if !db.shouldIntercept(ctx, link) {
 		return db.GetCore().DoInsert(ctx, link, table, list, option)
 	}
-
-	glog.Debugf(ctx, "[Seata] Intercepting INSERT on table: %s", table)
 
 	// 1. 执行 INSERT
 	result, err := db.GetCore().DoInsert(ctx, link, table, list, option)
@@ -213,7 +242,6 @@ func (db *SeataDB) DoInsert(
 		return nil, fmt.Errorf(ErrSaveUndoLog, table, err)
 	}
 
-	glog.Debugf(ctx, "[Seata] INSERT intercepted successfully")
 	return result, nil
 }
 
@@ -229,8 +257,6 @@ func (db *SeataDB) DoDelete(
 	if !db.shouldIntercept(ctx, link) {
 		return db.GetCore().DoDelete(ctx, link, table, condition, args...)
 	}
-
-	glog.Debugf(ctx, "[Seata] Intercepting DELETE on table: %s", table)
 
 	// 1. 生成 beforeImage
 	imageGen := NewImageGenerator(db.resource)
@@ -256,7 +282,6 @@ func (db *SeataDB) DoDelete(
 		return nil, fmt.Errorf(ErrSaveUndoLog, table, err)
 	}
 
-	glog.Debugf(ctx, "[Seata] DELETE intercepted successfully, rows affected: %d", len(beforeImage.Rows))
 	return result, nil
 }
 
@@ -296,7 +321,6 @@ func (db *SeataDB) saveUndoLog(
 		AfterImage:  afterImage,
 	})
 
-	glog.Debugf(ctx, "[Seata] Undo log saved to transaction, type=%s, table=%s", sqlType, tableName)
 	return nil
 }
 

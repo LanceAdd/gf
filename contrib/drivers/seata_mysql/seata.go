@@ -5,179 +5,90 @@
 // You can obtain one at https://github.com/gogf/gf.
 
 // Package seata_mysql 提供 GF 框架的 Seata AT 模式分布式事务支持
+//
+// 本驱动仅支持 Seata AT 模式，不支持 TCC、XA、SAGA 等其他事务模式。
+// AT 模式是 Seata 最常用的模式，通过 undo_log 实现自动回滚。
 package seata_mysql
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
-	"time"
-
-	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/seata/seata-go/pkg/client"
-	"github.com/seata/seata-go/pkg/datasource/sql"
-	"github.com/seata/seata-go/pkg/datasource/sql/undo"
 	"github.com/seata/seata-go/pkg/protocol/branch"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gctx"
-	"github.com/gogf/gf/v2/os/glog"
 )
 
-var (
-	// globalConfig 全局配置
-	globalConfig *Config
-
-	// initialized 是否已初始化
-	initialized bool
-
-	// atInitOnce 确保 AT模式只初始化一次
-	atInitOnce sync.Once
-)
-
-// Init 初始化 Seata AT 模式
+// Init 初始化 Seata AT 模式驱动
+//
+// 本驱动仅支持 AT 模式，不支持 TCC/XA/SAGA 等其他模式。
+//
+// 两种初始化模式：
+// 1. 完整模式：设置环境变量 SEATA_GO_CONFIG_PATH，提供完整的分布式事务协调能力
+//    - 需要配置 seatago.yml 文件
+//    - 会初始化 RM、TM、远程通信等完整组件
+//    - 适用于生产环境
+//
+// 2. 精简模式：不设置环境变量，仅提供驱动包装
+//    - 不初始化任何 Seata 组件
+//    - 仅提供基础的驱动注册
+//    - 适用于开发测试或不需要分布式事务的场景
 func Init(config *Config) error {
-	if initialized {
-		return gerror.NewCode(gcode.CodeInvalidOperation, "Seata already initialized")
-	}
-
 	if config == nil {
 		config = DefaultConfig()
 	}
 
-	globalConfig = config
 	ctx := gctx.GetInitCtx()
 
-	glog.Info(ctx, "[Seata] Initializing Seata AT mode driver...")
-
-	// 1. 初始化 Seata 客户端配置
+	// 1. 初始化 Seata 客户端（如果配置了 SEATA_GO_CONFIG_PATH）
 	if err := initSeataClient(ctx, config); err != nil {
 		return gerror.WrapCode(gcode.CodeInternalError, err, "failed to initialize Seata client")
 	}
 
-	// 2. 初始化 AT 模式
-	if err := initATMode(ctx, config); err != nil {
-		return gerror.WrapCode(gcode.CodeInternalError, err, "failed to initialize AT mode")
-	}
-
-	// 3. 注册驱动到 GF
+	// 2. 注册 AT 驱动到 GF
 	if err := registerDriver(ctx, config); err != nil {
 		return gerror.WrapCode(gcode.CodeInternalError, err, "failed to register driver")
 	}
-
-	initialized = true
-	glog.Info(ctx, "[Seata] Seata AT mode driver initialized successfully")
 
 	return nil
 }
 
 // initSeataClient 初始化 Seata 客户端
+//
+// 完整模式：检测到 SEATA_GO_CONFIG_PATH 环境变量时，调用 client.InitPath
+// 精简模式：未设置环境变量时，仅记录日志，不初始化任何组件
 func initSeataClient(ctx context.Context, config *Config) error {
-	glog.Info(ctx, "[Seata] Initializing Seata client...")
-
 	// 检查是否设置了配置文件路径
 	configPath := os.Getenv("SEATA_GO_CONFIG_PATH")
-	if configPath != "" {
-		// 使用配置文件初始化
-		glog.Infof(ctx, "[Seata] Loading config from file: %s", configPath)
-		client.InitPath("")
-	} else {
-		// 使用程序内配置，跳过配置文件加载
-		glog.Info(ctx, "[Seata] Using in-memory configuration (no config file)")
-		// 不调用 client.InitPath，避免配置文件检查
-		// Seata-Go SDK 允许直接使用，只是不会连接到 Seata Server
+	if configPath == "" {
+		// 精简模式：不初始化 Seata 组件
+		return nil
 	}
 
-	glog.Info(ctx, "[Seata] Seata client initialized")
+	// 完整模式：使用配置文件初始化完整的 Seata 客户端
+	// 这会初始化 RM、TM、远程通信、处理器等所有组件
+	// 注意：虽然 client.InitPath 会初始化 TCC/XA，但我们只使用 AT 模式
+	client.InitPath("")
+
 	return nil
 }
 
-// initATMode 初始化 AT 模式
-func initATMode(ctx context.Context, config *Config) error {
-	var initErr error
-
-	// 使用 sync.Once 确保只初始化一次，避免 Prometheus metrics 重复注册
-	atInitOnce.Do(func() {
-		glog.Info(ctx, "[Seata] Initializing AT mode...")
-
-		// 使用 defer recover 捕获 panic，避免 metrics 重复注册导致的崩溃
-		defer func() {
-			if r := recover(); r != nil {
-				// 检查是否是 metrics 重复注册错误
-				errMsg := fmt.Sprintf("%v", r)
-				if stringContains(errMsg, "duplicate metrics") {
-					glog.Warning(ctx, "[Seata] AT mode already initialized (metrics already registered), skipping...")
-					initErr = nil
-				} else {
-					// 其他 panic，重新抛出
-					initErr = gerror.Newf("AT mode initialization failed: %v", r)
-				}
-			}
-		}()
-
-		// 初始化 Undo Log 配置
-		undoConfig := undo.Config{
-			OnlyCareUpdateColumns: !config.AT.OnlyCarePrimaryKey,
-		}
-
-		// 初始化异步工作器配置
-		asyncConfig := sql.AsyncWorkerConfig{
-			// 设置默认值，避免 NewTicker panic
-			BufferLimit:            10000,       // 缓冲区大小
-			BufferCleanInterval:    time.Second, // 1秒清理一次
-			ReceiveChanSize:        100,         // 接收通道大小
-			CommitWorkerCount:      5,           // 提交工作线程数
-			CommitWorkerBufferSize: 100,         // 提交缓冲区大小
-		}
-
-		// 初始化 AT 模式
-		sql.InitAT(undoConfig, asyncConfig)
-
-		glog.Info(ctx, "[Seata] AT mode initialized")
-	})
-
-	return initErr
-}
-
-// stringContains 检查字符串是否包含子字符串
-func stringContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-// registerDriver 注册 AT 模式驱动
+// registerDriver 注册 AT 模式驱动（本驱动仅支持 AT 模式）
 func registerDriver(ctx context.Context, config *Config) error {
-	glog.Info(ctx, "[Seata] Registering AT mode driver...")
 	driver := NewDriverAT(config)
 	if err := gdb.Register(DriverNameATMySQL, driver); err != nil {
 		return fmt.Errorf("failed to register AT driver: %w", err)
 	}
-	glog.Info(ctx, "[Seata] AT mode driver registered")
 	return nil
 }
 
-// GetConfig 获取全局配置
-func GetConfig() *Config {
-	return globalConfig
-}
-
-// IsInitialized 检查是否已初始化
-func IsInitialized() bool {
-	return initialized
-}
-
-// GetBranchType 获取分支类型
+// GetBranchType 获取分支类型（始终返回 AT，因为本驱动只支持 AT 模式）
 func GetBranchType() branch.BranchType {
-	if globalConfig == nil {
-		return branch.BranchTypeAT
-	}
-	return globalConfig.GetBranchType()
+	// 本驱动只支持 AT 模式，不支持 TCC/XA/SAGA
+	return branch.BranchTypeAT
 }
