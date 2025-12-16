@@ -16,9 +16,10 @@ import (
 	"github.com/seata/seata-go/pkg/protocol/branch"
 	"github.com/seata/seata-go/pkg/tm"
 
-	"github.com/gogf/gf/contrib/drivers/seata_mysql/v2"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/test/gtest"
+
+	"github.com/gogf/gf/contrib/drivers/seata_mysql/v2"
 )
 
 var (
