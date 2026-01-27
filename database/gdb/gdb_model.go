@@ -56,6 +56,7 @@ type Model struct {
 	softTimeOption  SoftTimeOption    // SoftTimeOption is the option to customize soft time feature for Model.
 	shardingConfig  ShardingConfig    // ShardingConfig for database/table sharding feature.
 	shardingValue   any               // Sharding value for sharding feature.
+	preload         bool              // preload enables batch recursive scanning for association operations (Solving N+1 problem).
 }
 
 // ModelHandler is a function that handles given Model and returns a new Model that is custom modified.
