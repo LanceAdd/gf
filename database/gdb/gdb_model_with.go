@@ -188,11 +188,12 @@ func (m *Model) doWithScanStruct(pointer any) error {
 		if m.cacheEnabled && m.cacheOption.Name == "" {
 			model = model.Cache(m.cacheOption)
 		}
+		model.preload = m.preload
 		err = model.Fields(fieldKeys).
 			Where(relatedSourceName, relatedTargetValue).
 			Scan(bindToReflectValue)
 		// It ignores sql.ErrNoRows in with feature.
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 	}
@@ -314,6 +315,7 @@ func (m *Model) doWithScanStructs(pointer any) error {
 		if m.cacheEnabled && m.cacheOption.Name == "" {
 			model = model.Cache(m.cacheOption)
 		}
+		model.preload = m.preload
 		err = model.Fields(fieldKeys).
 			Where(relatedSourceName, relatedTargetValue).
 			ScanList(pointer, fieldName, parsedTagOutput.With)
