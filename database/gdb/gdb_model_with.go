@@ -353,16 +353,18 @@ func (m *Model) parseWithTagInFieldStruct(field gstructs.Field) (output parseWit
 		if len(array) == 2 {
 			key = array[0]
 			data[key] = gstr.Trim(array[1])
-			if key == OrmTagForChunkSize {
+			switch key {
+			case OrmTagForChunkSize:
 				ifChunkSize = true
-			} else if key == OrmTagForBatchMinRows {
+			case OrmTagForBatchMinRows:
 				ifBatchMinRows = true
 			}
 		} else {
-			if key == OrmTagForWithOrder {
+			switch key {
+			case OrmTagForWithOrder:
 				// supporting multiple order fields
 				data[key] += "," + gstr.Trim(v)
-			} else {
+			default:
 				data[key] += " " + gstr.Trim(v)
 			}
 		}
