@@ -1,0 +1,94 @@
+# gtransport
+
+`gtransport` provides framed read/write over stream connections using a fixed codec per transport.
+
+It is intentionally small:
+
+- `Codec` converts between raw stream bytes and complete frames.
+- `Transport` performs synchronous `ReadFrame` / `WriteFrame` operations on an `io.ReadWriteCloser`.
+- Business logic stays outside the package.
+
+## Public API
+
+```go
+type Codec interface {
+    Decode(in []byte) (frame []byte, consumed int, err error)
+    Encode(frame []byte) ([]byte, error)
+}
+
+type Transport struct{}
+
+func New(conn io.ReadWriteCloser, codec Codec, opts ...Option) *Transport
+func (t *Transport) ReadFrame() ([]byte, error)
+func (t *Transport) WriteFrame(frame []byte) error
+func (t *Transport) Close() error
+```
+
+## Options
+
+- `WithReadTimeout(d time.Duration)`
+- `WithMaxBufferBytes(n int)`
+
+## Common Codecs
+
+- `NewDelimiter(delim []byte, maxPayloadBytes int, strip bool)`
+- `NewLine(maxPayloadBytes int, strip bool)`
+  Decodes both `LF` and `CRLF` terminated frames, and encodes using `LF`.
+- `NewFixedLength(length int)`
+- `NewLengthPrefixed(fieldBytes int, order binary.ByteOrder, maxPayloadBytes int)`
+
+## Advanced Codec
+
+- `NewLengthField(opt LengthFieldOption)`
+
+Use this only when the simple length-prefixed constructor is not enough, for
+example when the length field is embedded inside a custom frame header.
+
+## Protocol Codecs
+
+Protocol-aware codecs should live in subpackages instead of the `gtransport`
+ root package.
+
+- `gtransport/modbus`
+  - `modbus.NewTCP()`
+  - `modbus.NewRTU()`
+
+`modbus.NewTCP()` works on full Modbus TCP ADUs and rewrites the MBAP `Length`
+field during encoding.
+
+`modbus.NewRTU()` validates CRC during decoding, returns RTU payload without
+CRC, and appends CRC during encoding.
+
+Both Modbus codecs also validate supported function-code payload legality for
+the built-in function set, including quantity ranges, byte-count consistency,
+single-coil values, and exception frame shape.
+
+The built-in Modbus codecs intentionally stop at protocol-static validation.
+They do not enforce deployment or application policy such as Unit ID
+whitelists, device ownership, ProcessImage bounds, or register-map semantics.
+
+## Example
+
+```go
+codec := gtransport.NewLengthPrefixed(2, binary.BigEndian, 1024)
+tr := gtransport.New(conn, codec)
+defer tr.Close()
+
+for {
+    frame, err := tr.ReadFrame()
+    if err != nil {
+        return err
+    }
+
+    if err := tr.WriteFrame(frame); err != nil {
+        return err
+    }
+}
+```
+
+## Design Notes
+
+- One transport binds to one fixed codec.
+- Reads are synchronous and decode one full frame at a time.
+- Writes are synchronous and serialized internally.
+- There is no handler chain, channel API, or built-in business processing flow.
