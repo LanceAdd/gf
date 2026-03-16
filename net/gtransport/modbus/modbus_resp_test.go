@@ -76,3 +76,76 @@ func TestEncodeRTUResponseWriteMultipleRegisters(t *testing.T) {
 		t.Fatalf("expected %x, got %x", want, got)
 	}
 }
+
+func TestEncodeTCPExceptionResponse(t *testing.T) {
+	resp := ExceptionResponse{
+		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0506, UnitID: 0x55},
+		function:      FunctionCode(0x03),
+		ExceptionCode: 0x02,
+	}
+
+	got, err := EncodeTCPResponse(resp)
+	if err != nil {
+		t.Fatalf("encode tcp exception response: %v", err)
+	}
+
+	want := []byte{0x05, 0x06, 0x00, 0x00, 0x00, 0x03, 0x55, 0x83, 0x02}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
+func TestEncodeRTUExceptionResponse(t *testing.T) {
+	resp := ExceptionResponse{
+		meta:          ADUMeta{Transport: TransportRTU, UnitID: 0x66},
+		function:      FunctionCode(0x04),
+		ExceptionCode: 0x03,
+	}
+
+	got, err := EncodeRTUResponse(resp)
+	if err != nil {
+		t.Fatalf("encode rtu exception response: %v", err)
+	}
+
+	want := appendCRC([]byte{0x66, 0x84, 0x03})
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
+func TestInvalidExceptionResponseRejectsUnsupportedBaseFunction(t *testing.T) {
+	resp := ExceptionResponse{
+		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0708, UnitID: 0x77},
+		function:      FunctionCode(0x11),
+		ExceptionCode: 0x01,
+	}
+
+	_, err := EncodeTCPResponse(resp)
+	if err == nil {
+		t.Fatal("expected unsupported function error")
+	}
+}
+
+func TestInvalidReadBitsResponseRejectsEmptyValues(t *testing.T) {
+	resp := ReadBitsResponse{
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x090A, UnitID: 0x88},
+		function: FunctionCode(0x01),
+	}
+
+	_, err := EncodeTCPResponse(resp)
+	if err == nil {
+		t.Fatal("expected empty read bits response error")
+	}
+}
+
+func TestInvalidReadRegistersResponseRejectsEmptyValues(t *testing.T) {
+	resp := ReadRegistersResponse{
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0B0C, UnitID: 0x99},
+		function: FunctionCode(0x03),
+	}
+
+	_, err := EncodeTCPResponse(resp)
+	if err == nil {
+		t.Fatal("expected empty read registers response error")
+	}
+}

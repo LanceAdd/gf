@@ -120,6 +120,24 @@ func (r WriteMultipleRegistersResponse) IsException() bool {
 	return false
 }
 
+type ExceptionResponse struct {
+	meta          ADUMeta
+	function      FunctionCode
+	ExceptionCode byte
+}
+
+func (r ExceptionResponse) Meta() ADUMeta {
+	return r.meta
+}
+
+func (r ExceptionResponse) FunctionCode() FunctionCode {
+	return r.function
+}
+
+func (r ExceptionResponse) IsException() bool {
+	return true
+}
+
 // EncodeTCPResponse encodes a typed Modbus response as a TCP ADU.
 func EncodeTCPResponse(resp Response) ([]byte, error) {
 	payload, err := encodeResponsePayload(resp)
@@ -163,6 +181,12 @@ func encodeResponsePayload(resp Response) ([]byte, error) {
 		payload = encodeWriteMultipleCoilsPayload(typed)
 	case WriteMultipleRegistersResponse:
 		payload = encodeWriteMultipleRegistersPayload(typed)
+	case ExceptionResponse:
+		var exceptionErr error
+		payload, exceptionErr = encodeExceptionResponsePayload(typed)
+		if exceptionErr != nil {
+			return nil, exceptionErr
+		}
 	default:
 		return nil, fmt.Errorf("unsupported modbus response type %T", resp)
 	}
@@ -235,4 +259,12 @@ func encodeWriteMultipleRegistersPayload(resp WriteMultipleRegistersResponse) []
 	binary.BigEndian.PutUint16(payload[2:4], resp.StartAddress)
 	binary.BigEndian.PutUint16(payload[4:6], resp.Quantity)
 	return payload
+}
+
+func encodeExceptionResponsePayload(resp ExceptionResponse) ([]byte, error) {
+	function := byte(resp.function)
+	if !isSupportedFunction(function) {
+		return nil, fmt.Errorf("unsupported modbus function code 0x%02x", function)
+	}
+	return []byte{resp.meta.UnitID, function | 0x80, resp.ExceptionCode}, nil
 }
