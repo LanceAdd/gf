@@ -11,6 +11,7 @@ import (
 	"fmt"
 )
 
+// delimiterCodec splits frames by a fixed delimiter sequence.
 type delimiterCodec struct {
 	delim           []byte
 	maxPayloadBytes int
@@ -21,12 +22,13 @@ type delimiterCodec struct {
 // When strip is true, the returned decoded frame excludes the delimiter.
 func NewDelimiter(delim []byte, maxPayloadBytes int, strip bool) Codec {
 	return &delimiterCodec{
-		delim:           append([]byte(nil), delim...),
+		delim:           bytes.Clone(delim),
 		maxPayloadBytes: maxPayloadBytes,
 		stripDelimiter:  strip,
 	}
 }
 
+// Decode returns one delimiter-terminated frame from the input buffer.
 func (c *delimiterCodec) Decode(in []byte) ([]byte, int, error) {
 	if len(c.delim) == 0 {
 		return nil, 0, fmt.Errorf("delimiter cannot be empty")
@@ -48,6 +50,7 @@ func (c *delimiterCodec) Decode(in []byte) ([]byte, int, error) {
 	return in[:end], end, nil
 }
 
+// Encode appends the configured delimiter after the payload bytes.
 func (c *delimiterCodec) Encode(frame []byte) ([]byte, error) {
 	if len(c.delim) == 0 {
 		return nil, fmt.Errorf("delimiter cannot be empty")

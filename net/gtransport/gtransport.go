@@ -19,6 +19,7 @@
 package gtransport
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -38,13 +39,18 @@ var (
 	ErrNeedMoreData = errors.New("need more data")
 )
 
+// readDeadliner is the minimal capability needed to apply per-read deadlines
+// on compatible stream connections.
 type readDeadliner interface {
 	SetReadDeadline(t time.Time) error
 }
 
 // Codec converts between raw stream bytes and complete frames.
 type Codec interface {
+	// Decode attempts to extract one frame from in and reports how many bytes
+	// were consumed from the front of the buffer.
 	Decode(in []byte) (frame []byte, consumed int, err error)
+	// Encode converts one logical frame into stream bytes ready to write.
 	Encode(frame []byte) ([]byte, error)
 }
 
@@ -115,6 +121,9 @@ func (t *Transport) ReadFrame() ([]byte, error) {
 		case err == nil && consumed == 0:
 			return nil, errors.New("invalid codec output: consumed bytes cannot be 0 when decoding succeeds")
 		case consumed > 0:
+			// Always discard bytes the codec explicitly consumed, even when it
+			// still asks for more input, so sticky-packet and resync scenarios can
+			// continue from the remaining unread tail.
 			t.readBuffer = t.readBuffer[consumed:]
 			t.shrinkReadBufferIfNeeded()
 		}
@@ -122,7 +131,7 @@ func (t *Transport) ReadFrame() ([]byte, error) {
 			if frame == nil {
 				continue
 			}
-			return append([]byte(nil), frame...), nil
+			return bytes.Clone(frame), nil
 		}
 		if !errors.Is(err, ErrNeedMoreData) {
 			return nil, err
@@ -160,6 +169,7 @@ func (t *Transport) WriteFrame(frame []byte) error {
 	return t.writeFull(encoded)
 }
 
+// writeFull keeps writing until all encoded bytes are sent or an error occurs.
 func (t *Transport) writeFull(data []byte) error {
 	offset := 0
 	for offset < len(data) {
@@ -177,17 +187,21 @@ func (t *Transport) writeFull(data []byte) error {
 	return nil
 }
 
+// shrinkReadBufferIfNeeded compacts or resets the read buffer after bytes have
+// been consumed.
 func (t *Transport) shrinkReadBufferIfNeeded() {
 	if len(t.readBuffer) == 0 {
 		if cap(t.readBuffer) > defaultReadBufferSize*8 {
+			// Drop oversized backing arrays after large bursts so the transport
+			// returns to a small steady-state footprint.
 			t.readBuffer = make([]byte, 0, defaultReadBufferSize)
 		}
 		return
 	}
 	if cap(t.readBuffer) > defaultReadBufferSize*8 &&
 		len(t.readBuffer)*4 < cap(t.readBuffer) {
-		buffer := make([]byte, len(t.readBuffer))
-		copy(buffer, t.readBuffer)
-		t.readBuffer = buffer
+		// Re-pack the unread tail when the spare capacity becomes much larger
+		// than the live data to avoid retaining large buffers indefinitely.
+		t.readBuffer = bytes.Clone(t.readBuffer)
 	}
 }

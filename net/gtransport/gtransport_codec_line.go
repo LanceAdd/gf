@@ -8,6 +8,7 @@ package gtransport
 
 import "fmt"
 
+// lineCodec splits frames on LF or CRLF line endings.
 type lineCodec struct {
 	maxPayloadBytes int
 	stripDelimiter  bool
@@ -23,6 +24,7 @@ func NewLine(maxPayloadBytes int, strip bool) Codec {
 	}
 }
 
+// Decode returns one line-terminated frame from the buffered input.
 func (c *lineCodec) Decode(in []byte) ([]byte, int, error) {
 	index, delimLen := c.findLineEnd(in)
 	if index < 0 {
@@ -41,6 +43,7 @@ func (c *lineCodec) Decode(in []byte) ([]byte, int, error) {
 	return in[:consumed], consumed, nil
 }
 
+// Encode normalizes writes to LF-terminated lines.
 func (c *lineCodec) Encode(frame []byte) ([]byte, error) {
 	if c.maxPayloadBytes > 0 && len(frame) > c.maxPayloadBytes {
 		return nil, fmt.Errorf("payload length exceeds max payload bytes %d", c.maxPayloadBytes)
@@ -51,8 +54,9 @@ func (c *lineCodec) Encode(frame []byte) ([]byte, error) {
 	return out, nil
 }
 
+// findLineEnd locates the next LF or CRLF terminator inside the buffer.
 func (c *lineCodec) findLineEnd(in []byte) (int, int) {
-	for i := 0; i < len(in); i++ {
+	for i := range len(in) {
 		if in[i] == '\n' {
 			if i > 0 && in[i-1] == '\r' {
 				return i - 1, 2

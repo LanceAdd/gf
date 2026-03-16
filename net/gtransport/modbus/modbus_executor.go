@@ -101,6 +101,8 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	}
 
 	if !isSupportedFunction(byte(req.FunctionCode())) {
+		// Preserve standard Modbus semantics for unknown typed requests whose
+		// function code is outside the supported built-in matrix.
 		return ExceptionResponse{
 			meta:          req.Meta(),
 			function:      req.FunctionCode(),
@@ -111,6 +113,8 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	return nil, fmt.Errorf("modbus request type %T is not executable", req)
 }
 
+// handleExecuteError converts process-image failures into Modbus exceptions
+// when the failure has protocol meaning.
 func handleExecuteError(req Request, err error) (Response, error) {
 	exceptionCode, ok := mapProcessImageExceptionCode(err)
 	if !ok {
@@ -123,11 +127,15 @@ func handleExecuteError(req Request, err error) (Response, error) {
 	}, nil
 }
 
+// mapProcessImageExceptionCode maps storage-layer failures onto standard
+// Modbus exception codes.
 func mapProcessImageExceptionCode(err error) (byte, bool) {
 	switch {
 	case errors.Is(err, ErrProcessImageAddressOutOfRange):
+		// Illegal Data Address.
 		return 0x02, true
 	case errors.Is(err, ErrProcessImageQuantityOutOfRange), errors.Is(err, ErrProcessImageWriteValuesEmpty):
+		// Illegal Data Value.
 		return 0x03, true
 	default:
 		return 0, false

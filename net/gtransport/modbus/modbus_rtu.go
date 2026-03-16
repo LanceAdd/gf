@@ -2,6 +2,7 @@ package modbus
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/gogf/gf/v2/net/gtransport"
@@ -12,8 +13,12 @@ const (
 	rtuMaxADULength = 256
 )
 
+// rtuCodec implements frame discovery, CRC validation, and encoding for raw
+// Modbus RTU ADUs.
 type rtuCodec struct{}
 
+// Decode scans the buffer for one complete RTU frame and returns the payload
+// without its trailing CRC bytes.
 func (c rtuCodec) Decode(in []byte) ([]byte, int, error) {
 	var lastErr error
 	for offset := 0; offset < len(in); offset++ {
@@ -24,9 +29,11 @@ func (c rtuCodec) Decode(in []byte) ([]byte, int, error) {
 		if err == nil {
 			return frame, offset + frameLength, nil
 		}
-		if err == gtransport.ErrNeedMoreData {
+		if errors.Is(err, gtransport.ErrNeedMoreData) {
 			return nil, 0, err
 		}
+		// Keep scanning forward so RTU streams can resynchronize after noise or
+		// a malformed prefix.
 		lastErr = err
 	}
 	if lastErr != nil {
@@ -35,6 +42,8 @@ func (c rtuCodec) Decode(in []byte) ([]byte, int, error) {
 	return nil, 0, gtransport.ErrNeedMoreData
 }
 
+// decodeCandidate validates a frame candidate starting at the current buffer
+// offset.
 func (c rtuCodec) decodeCandidate(in []byte) ([]byte, int, error) {
 	if len(in) < 2 {
 		return nil, 0, gtransport.ErrNeedMoreData
@@ -58,6 +67,7 @@ func (c rtuCodec) decodeCandidate(in []byte) ([]byte, int, error) {
 	return frame[:frameLength-rtuCRCLength], frameLength, nil
 }
 
+// Encode validates a CRC-less RTU payload and appends a fresh CRC trailer.
 func (c rtuCodec) Encode(frame []byte) ([]byte, error) {
 	if len(frame)+rtuCRCLength > rtuMaxADULength {
 		return nil, fmt.Errorf("modbus rtu frame too long: %d", len(frame)+rtuCRCLength)
@@ -71,6 +81,8 @@ func (c rtuCodec) Encode(frame []byte) ([]byte, error) {
 	return out, nil
 }
 
+// frameLength determines the most likely RTU ADU length from the function code
+// and payload shape.
 func (c rtuCodec) frameLength(in []byte) (int, error) {
 	if len(in) < 2 {
 		return 0, gtransport.ErrNeedMoreData
@@ -99,9 +111,14 @@ func (c rtuCodec) frameLength(in []byte) (int, error) {
 	}
 }
 
+// writeMultipleFrameLength resolves the shared request/response function codes
+// for write-multiple RTU frames.
 func (c rtuCodec) writeMultipleFrameLength(in []byte) (int, error) {
 	const fixedLen = 8
 	if c.hasValidCRC(in, fixedLen) {
+		// Write-multiple responses are fixed length and share the same function
+		// codes as variable-length requests, so prefer the valid fixed-length
+		// interpretation when its CRC matches.
 		return fixedLen, nil
 	}
 	if len(in) < 7 {
@@ -126,8 +143,13 @@ func (c rtuCodec) writeMultipleFrameLength(in []byte) (int, error) {
 	return fixedLen, nil
 }
 
+// ambiguousFrameLength handles function codes whose request and response forms
+// have different lengths.
 func (c rtuCodec) ambiguousFrameLength(in []byte, fixedLen int, variableLenFn func([]byte) (int, bool)) (int, error) {
 	if c.hasValidCRC(in, fixedLen) {
+		// For read functions, exception responses and normal requests share the
+		// same function codes. A valid fixed-length CRC means we can safely treat
+		// the candidate as the shorter frame.
 		return fixedLen, nil
 	}
 	if variableLen, ok := variableLenFn(in); ok {
@@ -147,6 +169,8 @@ func (c rtuCodec) ambiguousFrameLength(in []byte, fixedLen int, variableLenFn fu
 	return fixedLen, nil
 }
 
+// hasValidCRC checks whether the first frameLen bytes end in a matching RTU
+// CRC trailer.
 func (c rtuCodec) hasValidCRC(in []byte, frameLen int) bool {
 	if frameLen < 4 || len(in) < frameLen {
 		return false
@@ -157,11 +181,12 @@ func (c rtuCodec) hasValidCRC(in []byte, frameLen int) bool {
 	return crcGot == crcWant
 }
 
+// modbusCRC computes the standard Modbus RTU CRC16 checksum.
 func modbusCRC(data []byte) uint16 {
 	crc := uint16(0xFFFF)
 	for _, b := range data {
 		crc ^= uint16(b)
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			if crc&0x0001 != 0 {
 				crc = (crc >> 1) ^ 0xA001
 			} else {

@@ -12,6 +12,8 @@ import (
 	"math"
 )
 
+// LengthFieldOption configures the advanced length-field codec used by
+// NewLengthField.
 type LengthFieldOption struct {
 	// ByteOrder is the byte order used for the embedded length field.
 	ByteOrder binary.ByteOrder
@@ -30,6 +32,8 @@ type LengthFieldOption struct {
 	InitialBytesToStrip int
 }
 
+// lengthFieldCodec implements decoding and encoding around an embedded length
+// field inside the frame header.
 type lengthFieldCodec struct {
 	opt                  LengthFieldOption
 	lengthFieldEndOffset int
@@ -70,6 +74,8 @@ func NewLengthField(opt LengthFieldOption) Codec {
 	return c
 }
 
+// Decode reads the embedded length field and returns one complete frame once
+// enough bytes are buffered.
 func (c *lengthFieldCodec) Decode(in []byte) ([]byte, int, error) {
 	if c.initErr != nil {
 		return nil, 0, c.initErr
@@ -81,6 +87,9 @@ func (c *lengthFieldCodec) Decode(in []byte) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	// The configured length field usually excludes at least the bytes before
+	// the field itself, so rebuild the full frame length from the raw field
+	// value plus the caller's adjustment and the header bytes already skipped.
 	frameLength := unadjusted + int64(c.opt.LengthAdjustment) + int64(c.lengthFieldEndOffset)
 	if frameLength < int64(c.lengthFieldEndOffset) {
 		return nil, 0, fmt.Errorf("invalid frame length %d less than length field end offset %d", frameLength, c.lengthFieldEndOffset)
@@ -98,6 +107,7 @@ func (c *lengthFieldCodec) Decode(in []byte) ([]byte, int, error) {
 	return in[c.opt.InitialBytesToStrip:consumed], consumed, nil
 }
 
+// Encode writes a fresh embedded length field based on the payload size.
 func (c *lengthFieldCodec) Encode(frame []byte) ([]byte, error) {
 	if c.initErr != nil {
 		return nil, c.initErr
@@ -119,6 +129,7 @@ func (c *lengthFieldCodec) Encode(frame []byte) ([]byte, error) {
 	return out, nil
 }
 
+// validate checks constructor options once and stores any reusable setup error.
 func (c *lengthFieldCodec) validate() error {
 	if c.opt.LengthFieldOffset < 0 {
 		return fmt.Errorf("invalid length field offset %d", c.opt.LengthFieldOffset)
@@ -134,6 +145,8 @@ func (c *lengthFieldCodec) validate() error {
 	return nil
 }
 
+// getUnadjustedFrameLength reads the raw length value from the configured
+// length-field location without applying framing adjustments.
 func (c *lengthFieldCodec) getUnadjustedFrameLength(in []byte) (int64, error) {
 	offset := c.opt.LengthFieldOffset
 	length := c.opt.LengthFieldLength
@@ -144,6 +157,8 @@ func (c *lengthFieldCodec) getUnadjustedFrameLength(in []byte) (int64, error) {
 	case 2:
 		return int64(c.opt.ByteOrder.Uint16(field)), nil
 	case 3:
+		// Three-byte length fields are common in binary protocols but are not
+		// supported by encoding/binary helpers, so decode them manually.
 		if c.opt.ByteOrder == binary.LittleEndian {
 			return int64(uint32(field[0]) | uint32(field[1])<<8 | uint32(field[2])<<16), nil
 		}
@@ -161,6 +176,8 @@ func (c *lengthFieldCodec) getUnadjustedFrameLength(in []byte) (int64, error) {
 	}
 }
 
+// putLengthField writes the computed length value back into the configured
+// field width and byte order.
 func (c *lengthFieldCodec) putLengthField(buf []byte, length int) {
 	switch c.opt.LengthFieldLength {
 	case 1:
@@ -184,6 +201,8 @@ func (c *lengthFieldCodec) putLengthField(buf []byte, length int) {
 	}
 }
 
+// checkLengthOverflow rejects values that cannot fit into the configured field
+// width during encoding.
 func (c *lengthFieldCodec) checkLengthOverflow(length int) error {
 	lengthValue := uint64(length)
 	var maxVal uint64

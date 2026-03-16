@@ -15,6 +15,8 @@ func HandleRTURequestPayload(payload []byte, image ProcessImage) ([]byte, error)
 	return handleRequestFrame(payload, image, parseRTUTransportPayload, encodeRTUTransportPayload)
 }
 
+// handleRequestFrame is the shared request pipeline for parse -> execute ->
+// encode across TCP frame, RTU frame, and RTU payload entry points.
 func handleRequestFrame(
 	frame []byte,
 	image ProcessImage,
@@ -32,10 +34,14 @@ func handleRequestFrame(
 	return encode(resp)
 }
 
+// parseRTUTransportPayload reconstructs a typed request from the CRC-stripped
+// payload returned by the RTU transport codec.
 func parseRTUTransportPayload(payload []byte) (Request, error) {
 	if err := validateModbusPayload(payload); err != nil {
 		return nil, err
 	}
+	// The RTU transport codec already stripped and verified the CRC, so only
+	// protocol metadata needs to be reconstructed here.
 	meta := ADUMeta{
 		Transport: TransportRTU,
 		SlaveID:   payload[0],
@@ -43,6 +49,8 @@ func parseRTUTransportPayload(payload []byte) (Request, error) {
 	return parseRequest(meta, payload)
 }
 
+// encodeRTUTransportPayload encodes a typed response back into CRC-stripped RTU
+// payload bytes for transport-level writing.
 func encodeRTUTransportPayload(resp Response) ([]byte, error) {
 	return encodeResponsePayload(resp)
 }
