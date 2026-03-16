@@ -91,6 +91,65 @@ func (t *Transport) Close() error
 
 原始 RTU ADU 应使用 `HandleRTURequestFrame`，transport 解码后的 RTU 内容应使用 `HandleRTURequestPayload`。
 
+### 常见流程
+
+推荐 TCP 流程：
+
+```go
+frame, err := tr.ReadFrame()
+if err != nil {
+    return err
+}
+
+respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
+if err != nil {
+    return err
+}
+
+return tr.WriteFrame(respFrame)
+```
+
+推荐原始 RTU 流程：
+
+```go
+respFrame, err := modbus.HandleRTURequestFrame(frame, image)
+```
+
+配合 `modbus.NewRTU()` 的推荐 RTU transport 流程：
+
+```go
+payload, err := tr.ReadFrame()
+if err != nil {
+    return err
+}
+
+respPayload, err := modbus.HandleRTURequestPayload(payload, image)
+if err != nil {
+    return err
+}
+
+return tr.WriteFrame(respPayload)
+```
+
+高级手动流程：
+
+```go
+req, err := modbus.ParseTCPRequest(frame)
+if err != nil {
+    return err
+}
+
+resp, err := modbus.ExecuteRequest(req, image)
+if err != nil {
+    return err
+}
+
+out, err := modbus.EncodeTCPResponse(resp)
+if err != nil {
+    return err
+}
+```
+
 ## 示例
 
 ```go

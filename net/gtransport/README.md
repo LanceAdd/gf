@@ -100,6 +100,65 @@ Use these when you want protocol building blocks and your own control flow:
 Use `HandleRTURequestFrame` for raw RTU ADUs and `HandleRTURequestPayload` for
 transport-decoded RTU payloads.
 
+### Common Flows
+
+Recommended TCP flow:
+
+```go
+frame, err := tr.ReadFrame()
+if err != nil {
+    return err
+}
+
+respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
+if err != nil {
+    return err
+}
+
+return tr.WriteFrame(respFrame)
+```
+
+Recommended raw RTU flow:
+
+```go
+respFrame, err := modbus.HandleRTURequestFrame(frame, image)
+```
+
+Recommended RTU transport flow with `modbus.NewRTU()`:
+
+```go
+payload, err := tr.ReadFrame()
+if err != nil {
+    return err
+}
+
+respPayload, err := modbus.HandleRTURequestPayload(payload, image)
+if err != nil {
+    return err
+}
+
+return tr.WriteFrame(respPayload)
+```
+
+Advanced manual flow:
+
+```go
+req, err := modbus.ParseTCPRequest(frame)
+if err != nil {
+    return err
+}
+
+resp, err := modbus.ExecuteRequest(req, image)
+if err != nil {
+    return err
+}
+
+out, err := modbus.EncodeTCPResponse(resp)
+if err != nil {
+    return err
+}
+```
+
 ## Example
 
 ```go
