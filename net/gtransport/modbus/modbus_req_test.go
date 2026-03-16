@@ -17,7 +17,7 @@ func TestParseTCPRequestReadCoils(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ReadCoilsRequest, got %T", req)
 	}
-	if readReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x1234, UnitID: 0x11}) {
+	if readReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x1234, SlaveID: 0x11}) {
 		t.Fatalf("unexpected meta: %+v", readReq.Meta())
 	}
 	if readReq.FunctionCode() != FunctionCode(0x01) {
@@ -40,7 +40,7 @@ func TestParseTCPRequestReadHoldingRegisters(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ReadHoldingRegistersRequest, got %T", req)
 	}
-	if readReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0xABCD, UnitID: 0x22}) {
+	if readReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0xABCD, SlaveID: 0x22}) {
 		t.Fatalf("unexpected meta: %+v", readReq.Meta())
 	}
 	if readReq.FunctionCode() != FunctionCode(0x03) {
@@ -63,7 +63,7 @@ func TestParseRTURequestReadDiscreteInputs(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ReadDiscreteInputsRequest, got %T", req)
 	}
-	if readReq.Meta() != (ADUMeta{Transport: TransportRTU, UnitID: 0x33}) {
+	if readReq.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x33}) {
 		t.Fatalf("unexpected meta: %+v", readReq.Meta())
 	}
 	if readReq.FunctionCode() != FunctionCode(0x02) {
@@ -86,7 +86,7 @@ func TestParseRTURequestReadInputRegisters(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ReadInputRegistersRequest, got %T", req)
 	}
-	if readReq.Meta() != (ADUMeta{Transport: TransportRTU, UnitID: 0x44}) {
+	if readReq.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x44}) {
 		t.Fatalf("unexpected meta: %+v", readReq.Meta())
 	}
 	if readReq.FunctionCode() != FunctionCode(0x04) {
@@ -132,7 +132,7 @@ func TestParseTCPRequestWriteSingleCoil(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected WriteSingleCoilRequest, got %T", req)
 	}
-	if writeReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x0009, UnitID: 0x55}) {
+	if writeReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x0009, SlaveID: 0x55}) {
 		t.Fatalf("unexpected meta: %+v", writeReq.Meta())
 	}
 	if writeReq.FunctionCode() != FunctionCode(0x05) {
@@ -155,7 +155,7 @@ func TestParseTCPRequestWriteSingleRegister(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected WriteSingleRegisterRequest, got %T", req)
 	}
-	if writeReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x000A, UnitID: 0x66}) {
+	if writeReq.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x000A, SlaveID: 0x66}) {
 		t.Fatalf("unexpected meta: %+v", writeReq.Meta())
 	}
 	if writeReq.FunctionCode() != FunctionCode(0x06) {
@@ -178,7 +178,7 @@ func TestParseRTURequestWriteMultipleCoils(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected WriteMultipleCoilsRequest, got %T", req)
 	}
-	if writeReq.Meta() != (ADUMeta{Transport: TransportRTU, UnitID: 0x77}) {
+	if writeReq.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x77}) {
 		t.Fatalf("unexpected meta: %+v", writeReq.Meta())
 	}
 	if writeReq.FunctionCode() != FunctionCode(0x0F) {
@@ -210,7 +210,7 @@ func TestParseRTURequestWriteMultipleRegisters(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected WriteMultipleRegistersRequest, got %T", req)
 	}
-	if writeReq.Meta() != (ADUMeta{Transport: TransportRTU, UnitID: 0x88}) {
+	if writeReq.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x88}) {
 		t.Fatalf("unexpected meta: %+v", writeReq.Meta())
 	}
 	if writeReq.FunctionCode() != FunctionCode(0x10) {

@@ -20,7 +20,7 @@ const (
 type ADUMeta struct {
 	Transport     TransportKind
 	TransactionID uint16
-	UnitID        byte
+	SlaveID       byte
 }
 
 // Request is the common interface implemented by typed Modbus requests.
@@ -163,7 +163,7 @@ func ParseTCPRequest(frame []byte) (Request, error) {
 	meta := ADUMeta{
 		Transport:     TransportTCP,
 		TransactionID: binary.BigEndian.Uint16(frame[0:2]),
-		UnitID:        payload[0],
+		SlaveID:       payload[0],
 	}
 	return parseRequest(meta, payload)
 }
@@ -179,7 +179,7 @@ func ParseRTURequest(frame []byte) (Request, error) {
 	}
 	meta := ADUMeta{
 		Transport: TransportRTU,
-		UnitID:    payload[0],
+		SlaveID:   payload[0],
 	}
 	return parseRequest(meta, payload)
 }

@@ -199,7 +199,7 @@ func encodeResponsePayload(resp Response) ([]byte, error) {
 func encodeReadBitsPayload(resp ReadBitsResponse) []byte {
 	byteCount := (len(resp.Values) + 7) / 8
 	payload := make([]byte, 3+byteCount)
-	payload[0] = resp.meta.UnitID
+	payload[0] = resp.meta.SlaveID
 	payload[1] = byte(resp.function)
 	payload[2] = byte(byteCount)
 	for i, value := range resp.Values {
@@ -212,7 +212,7 @@ func encodeReadBitsPayload(resp ReadBitsResponse) []byte {
 
 func encodeReadRegistersPayload(resp ReadRegistersResponse) []byte {
 	payload := make([]byte, 3+len(resp.Values)*2)
-	payload[0] = resp.meta.UnitID
+	payload[0] = resp.meta.SlaveID
 	payload[1] = byte(resp.function)
 	payload[2] = byte(len(resp.Values) * 2)
 	offset := 3
@@ -225,7 +225,7 @@ func encodeReadRegistersPayload(resp ReadRegistersResponse) []byte {
 
 func encodeWriteSingleCoilPayload(resp WriteSingleCoilResponse) []byte {
 	payload := make([]byte, 6)
-	payload[0] = resp.meta.UnitID
+	payload[0] = resp.meta.SlaveID
 	payload[1] = byte(resp.FunctionCode())
 	binary.BigEndian.PutUint16(payload[2:4], resp.Address)
 	if resp.Value {
@@ -236,7 +236,7 @@ func encodeWriteSingleCoilPayload(resp WriteSingleCoilResponse) []byte {
 
 func encodeWriteSingleRegisterPayload(resp WriteSingleRegisterResponse) []byte {
 	payload := make([]byte, 6)
-	payload[0] = resp.meta.UnitID
+	payload[0] = resp.meta.SlaveID
 	payload[1] = byte(resp.FunctionCode())
 	binary.BigEndian.PutUint16(payload[2:4], resp.Address)
 	binary.BigEndian.PutUint16(payload[4:6], resp.Value)
@@ -245,7 +245,7 @@ func encodeWriteSingleRegisterPayload(resp WriteSingleRegisterResponse) []byte {
 
 func encodeWriteMultipleCoilsPayload(resp WriteMultipleCoilsResponse) []byte {
 	payload := make([]byte, 6)
-	payload[0] = resp.meta.UnitID
+	payload[0] = resp.meta.SlaveID
 	payload[1] = byte(resp.FunctionCode())
 	binary.BigEndian.PutUint16(payload[2:4], resp.StartAddress)
 	binary.BigEndian.PutUint16(payload[4:6], resp.Quantity)
@@ -254,7 +254,7 @@ func encodeWriteMultipleCoilsPayload(resp WriteMultipleCoilsResponse) []byte {
 
 func encodeWriteMultipleRegistersPayload(resp WriteMultipleRegistersResponse) []byte {
 	payload := make([]byte, 6)
-	payload[0] = resp.meta.UnitID
+	payload[0] = resp.meta.SlaveID
 	payload[1] = byte(resp.FunctionCode())
 	binary.BigEndian.PutUint16(payload[2:4], resp.StartAddress)
 	binary.BigEndian.PutUint16(payload[4:6], resp.Quantity)
@@ -266,5 +266,5 @@ func encodeExceptionResponsePayload(resp ExceptionResponse) ([]byte, error) {
 	if !isSupportedFunction(function) {
 		return nil, fmt.Errorf("unsupported modbus function code 0x%02x", function)
 	}
-	return []byte{resp.meta.UnitID, function | 0x80, resp.ExceptionCode}, nil
+	return []byte{resp.meta.SlaveID, function | 0x80, resp.ExceptionCode}, nil
 }

@@ -10,6 +10,7 @@ func TestPublicAPIShape(t *testing.T) {
 		_ func(Response) ([]byte, error) = EncodeRTUResponse
 		_ ProcessImage                   = NewMemoryProcessImage(1, 1, 1, 1)
 	)
+	_ = ADUMeta{}.SlaveID
 }
 
 func appendCRC(payload []byte) []byte {

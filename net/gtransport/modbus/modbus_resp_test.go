@@ -7,7 +7,7 @@ import (
 
 func TestEncodeTCPResponseReadBits(t *testing.T) {
 	resp := ReadBitsResponse{
-		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0102, UnitID: 0x11},
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0102, SlaveID: 0x11},
 		function: FunctionCode(0x01),
 		Values:   []bool{true, false, true, true, false, false, true, false, true, false},
 	}
@@ -25,7 +25,7 @@ func TestEncodeTCPResponseReadBits(t *testing.T) {
 
 func TestEncodeTCPResponseReadRegisters(t *testing.T) {
 	resp := ReadRegistersResponse{
-		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0304, UnitID: 0x22},
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0304, SlaveID: 0x22},
 		function: FunctionCode(0x03),
 		Values:   []uint16{0x1234, 0x5678},
 	}
@@ -43,7 +43,7 @@ func TestEncodeTCPResponseReadRegisters(t *testing.T) {
 
 func TestEncodeRTUResponseWriteSingleRegister(t *testing.T) {
 	resp := WriteSingleRegisterResponse{
-		meta:    ADUMeta{Transport: TransportRTU, UnitID: 0x33},
+		meta:    ADUMeta{Transport: TransportRTU, SlaveID: 0x33},
 		Address: 0x0064,
 		Value:   0x1234,
 	}
@@ -61,7 +61,7 @@ func TestEncodeRTUResponseWriteSingleRegister(t *testing.T) {
 
 func TestEncodeRTUResponseWriteMultipleRegisters(t *testing.T) {
 	resp := WriteMultipleRegistersResponse{
-		meta:         ADUMeta{Transport: TransportRTU, UnitID: 0x44},
+		meta:         ADUMeta{Transport: TransportRTU, SlaveID: 0x44},
 		StartAddress: 0x0020,
 		Quantity:     0x0002,
 	}
@@ -79,7 +79,7 @@ func TestEncodeRTUResponseWriteMultipleRegisters(t *testing.T) {
 
 func TestEncodeTCPExceptionResponse(t *testing.T) {
 	resp := ExceptionResponse{
-		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0506, UnitID: 0x55},
+		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0506, SlaveID: 0x55},
 		function:      FunctionCode(0x03),
 		ExceptionCode: 0x02,
 	}
@@ -97,7 +97,7 @@ func TestEncodeTCPExceptionResponse(t *testing.T) {
 
 func TestEncodeRTUExceptionResponse(t *testing.T) {
 	resp := ExceptionResponse{
-		meta:          ADUMeta{Transport: TransportRTU, UnitID: 0x66},
+		meta:          ADUMeta{Transport: TransportRTU, SlaveID: 0x66},
 		function:      FunctionCode(0x04),
 		ExceptionCode: 0x03,
 	}
@@ -115,7 +115,7 @@ func TestEncodeRTUExceptionResponse(t *testing.T) {
 
 func TestInvalidExceptionResponseRejectsUnsupportedBaseFunction(t *testing.T) {
 	resp := ExceptionResponse{
-		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0708, UnitID: 0x77},
+		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0708, SlaveID: 0x77},
 		function:      FunctionCode(0x11),
 		ExceptionCode: 0x01,
 	}
@@ -128,7 +128,7 @@ func TestInvalidExceptionResponseRejectsUnsupportedBaseFunction(t *testing.T) {
 
 func TestInvalidReadBitsResponseRejectsEmptyValues(t *testing.T) {
 	resp := ReadBitsResponse{
-		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x090A, UnitID: 0x88},
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x090A, SlaveID: 0x88},
 		function: FunctionCode(0x01),
 	}
 
@@ -140,7 +140,7 @@ func TestInvalidReadBitsResponseRejectsEmptyValues(t *testing.T) {
 
 func TestInvalidReadRegistersResponseRejectsEmptyValues(t *testing.T) {
 	resp := ReadRegistersResponse{
-		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0B0C, UnitID: 0x99},
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x0B0C, SlaveID: 0x99},
 		function: FunctionCode(0x03),
 	}
 
