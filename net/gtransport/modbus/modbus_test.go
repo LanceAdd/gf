@@ -8,6 +8,8 @@ func TestPublicAPIShape(t *testing.T) {
 		_ func([]byte) (Request, error)  = ParseRTURequest
 		_ func(Response) ([]byte, error) = EncodeTCPResponse
 		_ func(Response) ([]byte, error) = EncodeRTUResponse
+		_ func([]byte, ProcessImage) ([]byte, error) = HandleTCPRequestFrame
+		_ func([]byte, ProcessImage) ([]byte, error) = HandleRTURequestFrame
 		_ ProcessImage                   = NewMemoryProcessImage(1, 1, 1, 1)
 	)
 	_ = ADUMeta{}.SlaveID
