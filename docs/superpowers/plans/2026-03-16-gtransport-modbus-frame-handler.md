@@ -15,6 +15,7 @@
 - Create: `net/gtransport/modbus/handle_request.go`
   - explicit `HandleTCPRequestFrame`
   - explicit `HandleRTURequestFrame`
+  - explicit `HandleRTURequestPayload`
   - optional tiny shared helper if needed
 - Create: `net/gtransport/modbus/handle_request_z_unit_test.go`
   - frame-level closure tests for TCP and RTU
@@ -42,7 +43,9 @@ Add tests for:
 - `HandleTCPRequestFrame` read request -> encoded TCP read response
 - `HandleTCPRequestFrame` write request -> encoded TCP write response and `MemoryProcessImage` state change
 - `HandleRTURequestFrame` read request -> encoded RTU read response
-- `HandleRTURequestFrame` write request -> encoded RTU write response and `MemoryProcessImage` state change
+- `HandleRTURequestFrame` write request -> encoded raw RTU response frame and `MemoryProcessImage` state change
+- `HandleRTURequestPayload` read request -> decoded RTU payload response
+- `HandleRTURequestPayload` write request -> decoded RTU payload response and `MemoryProcessImage` state change
 
 Each test should assert exact encoded bytes, not only typed values.
 
@@ -58,6 +61,7 @@ Create `net/gtransport/modbus/handle_request.go` with:
 ```go
 func HandleTCPRequestFrame(frame []byte, image ProcessImage) ([]byte, error)
 func HandleRTURequestFrame(frame []byte, image ProcessImage) ([]byte, error)
+func HandleRTURequestPayload(payload []byte, image ProcessImage) ([]byte, error)
 ```
 
 Implement the minimal flow:
@@ -65,6 +69,7 @@ Implement the minimal flow:
 - parse request using the transport-specific parser
 - execute request with `ExecuteRequest`
 - encode response with the transport-specific encoder
+- for RTU transport payload flow, parse and encode decoded payloads without CRC
 
 Do not add protocol auto-detection or extra policy.
 

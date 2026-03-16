@@ -168,7 +168,7 @@ func ParseTCPRequest(frame []byte) (Request, error) {
 	return parseRequest(meta, payload)
 }
 
-// ParseRTURequest parses a Modbus RTU frame or decoded RTU payload into a typed request.
+// ParseRTURequest parses a raw Modbus RTU frame with CRC into a typed request.
 func ParseRTURequest(frame []byte) (Request, error) {
 	payload, err := normalizeRTURequestPayload(frame)
 	if err != nil {

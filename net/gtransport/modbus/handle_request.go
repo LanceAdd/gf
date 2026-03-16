@@ -11,8 +11,8 @@ func HandleRTURequestFrame(frame []byte, image ProcessImage) ([]byte, error) {
 }
 
 // HandleRTURequestPayload handles one decoded Modbus RTU request payload and returns the decoded response payload.
-func HandleRTURequestPayload(frame []byte, image ProcessImage) ([]byte, error) {
-	return handleRequestFrame(frame, image, parseRTUTransportFrame, encodeRTUTransportFrame)
+func HandleRTURequestPayload(payload []byte, image ProcessImage) ([]byte, error) {
+	return handleRequestFrame(payload, image, parseRTUTransportPayload, encodeRTUTransportPayload)
 }
 
 func handleRequestFrame(
@@ -32,17 +32,17 @@ func handleRequestFrame(
 	return encode(resp)
 }
 
-func parseRTUTransportFrame(frame []byte) (Request, error) {
-	if err := validateModbusPayload(frame); err != nil {
+func parseRTUTransportPayload(payload []byte) (Request, error) {
+	if err := validateModbusPayload(payload); err != nil {
 		return nil, err
 	}
 	meta := ADUMeta{
 		Transport: TransportRTU,
-		SlaveID:   frame[0],
+		SlaveID:   payload[0],
 	}
-	return parseRequest(meta, frame)
+	return parseRequest(meta, payload)
 }
 
-func encodeRTUTransportFrame(resp Response) ([]byte, error) {
+func encodeRTUTransportPayload(resp Response) ([]byte, error) {
 	return encodeResponsePayload(resp)
 }

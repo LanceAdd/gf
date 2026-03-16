@@ -41,6 +41,7 @@ The integration layer should expose explicit transport-specific helpers:
 ```go
 func HandleTCPRequestFrame(frame []byte, image ProcessImage) ([]byte, error)
 func HandleRTURequestFrame(frame []byte, image ProcessImage) ([]byte, error)
+func HandleRTURequestPayload(payload []byte, image ProcessImage) ([]byte, error)
 ```
 
 The design intentionally does not use a single auto-detecting `HandleRequestFrame` helper because:
@@ -64,6 +65,14 @@ ParseTCPRequest(frame) -> ExecuteRequest(req, image) -> EncodeTCPResponse(resp)
 ParseRTURequest(frame) -> ExecuteRequest(req, image) -> EncodeRTUResponse(resp)
 ```
 
+### RTU Transport Payload
+
+For `gtransport.New(..., modbus.NewRTU())`, transport reads and writes decoded RTU payloads rather than raw CRC-bearing ADUs. That integration path should use:
+
+```go
+validateModbusPayload(payload) -> parseRequest(meta, payload) -> ExecuteRequest(req, image) -> encodeResponsePayload(resp)
+```
+
 Return rules:
 
 - parse failure returns Go `error`
@@ -80,6 +89,7 @@ Add the following files under `net/gtransport/modbus`:
 - `handle_request.go`
   - `HandleTCPRequestFrame`
   - `HandleRTURequestFrame`
+  - `HandleRTURequestPayload`
   - minimal shared helper if needed
 - `handle_request_z_unit_test.go`
   - frame-level integration tests
