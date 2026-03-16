@@ -1,5 +1,17 @@
 package modbus
 
+import "testing"
+
+func TestPublicAPIShape(t *testing.T) {
+	var (
+		_ func([]byte) (Request, error)  = ParseTCPRequest
+		_ func([]byte) (Request, error)  = ParseRTURequest
+		_ func(Response) ([]byte, error) = EncodeTCPResponse
+		_ func(Response) ([]byte, error) = EncodeRTUResponse
+		_ ProcessImage                   = NewMemoryProcessImage(1, 1, 1, 1)
+	)
+}
+
 func appendCRC(payload []byte) []byte {
 	frame := make([]byte, len(payload)+2)
 	copy(frame, payload)
