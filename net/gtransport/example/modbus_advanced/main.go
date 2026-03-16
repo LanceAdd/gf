@@ -12,12 +12,12 @@ import (
 )
 
 func main() {
-	if err := runRecommendedExample(); err != nil {
+	if err := runAdvancedExample(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func runRecommendedExample() error {
+func runAdvancedExample() error {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -46,9 +46,26 @@ func runRecommendedExample() error {
 			serverErrCh <- readErr
 			return
 		}
-		respFrame, handleErr := modbus.HandleTCPRequestFrame(frame, image)
-		if handleErr != nil {
-			serverErrCh <- handleErr
+		req, parseErr := modbus.ParseTCPRequest(frame)
+		if parseErr != nil {
+			serverErrCh <- parseErr
+			return
+		}
+		fmt.Printf("advanced example: received %T\n", req)
+
+		if _, ok := req.(modbus.ReadHoldingRegistersRequest); !ok {
+			serverErrCh <- fmt.Errorf("unexpected request type %T", req)
+			return
+		}
+
+		resp, executeErr := modbus.ExecuteRequest(req, image)
+		if executeErr != nil {
+			serverErrCh <- executeErr
+			return
+		}
+		respFrame, encodeErr := modbus.EncodeTCPResponse(resp)
+		if encodeErr != nil {
+			serverErrCh <- encodeErr
 			return
 		}
 		serverErrCh <- tr.WriteFrame(respFrame)
@@ -76,7 +93,7 @@ func runRecommendedExample() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("recommended example: read holding register value 0x%04X\n", value)
+	fmt.Printf("advanced example: read holding register value 0x%04X\n", value)
 
 	if err = <-serverErrCh; err != nil {
 		return err
