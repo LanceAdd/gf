@@ -148,6 +148,120 @@ func TestExecuteRequestMetadataPreservation(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestWriteSingleCoil(t *testing.T) {
+	image := NewMemoryProcessImage(4, 4, 4, 4)
+
+	resp, err := ExecuteRequest(WriteSingleCoilRequest{
+		meta:    ADUMeta{Transport: TransportTCP, TransactionID: 0x1112, SlaveID: 0x21},
+		Address: 2,
+		Value:   true,
+	}, image)
+	if err != nil {
+		t.Fatalf("execute request: %v", err)
+	}
+
+	writeResp, ok := resp.(WriteSingleCoilResponse)
+	if !ok {
+		t.Fatalf("expected WriteSingleCoilResponse, got %T", resp)
+	}
+	if writeResp.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x1112, SlaveID: 0x21}) {
+		t.Fatalf("unexpected response meta: %+v", writeResp.Meta())
+	}
+	if writeResp.Address != 2 || !writeResp.Value {
+		t.Fatalf("unexpected write response: %+v", writeResp)
+	}
+	if !image.coils[2] {
+		t.Fatal("expected process image coil write to persist")
+	}
+}
+
+func TestExecuteRequestWriteSingleRegister(t *testing.T) {
+	image := NewMemoryProcessImage(4, 4, 4, 4)
+
+	resp, err := ExecuteRequest(WriteSingleRegisterRequest{
+		meta:    ADUMeta{Transport: TransportRTU, SlaveID: 0x22},
+		Address: 1,
+		Value:   0x1234,
+	}, image)
+	if err != nil {
+		t.Fatalf("execute request: %v", err)
+	}
+
+	writeResp, ok := resp.(WriteSingleRegisterResponse)
+	if !ok {
+		t.Fatalf("expected WriteSingleRegisterResponse, got %T", resp)
+	}
+	if writeResp.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x22}) {
+		t.Fatalf("unexpected response meta: %+v", writeResp.Meta())
+	}
+	if writeResp.Address != 1 || writeResp.Value != 0x1234 {
+		t.Fatalf("unexpected write response: %+v", writeResp)
+	}
+	if image.holdingRegisters[1] != 0x1234 {
+		t.Fatalf("unexpected process image register value: 0x%04x", image.holdingRegisters[1])
+	}
+}
+
+func TestExecuteRequestWriteMultipleCoils(t *testing.T) {
+	image := NewMemoryProcessImage(6, 4, 4, 4)
+	values := []bool{true, false, true}
+
+	resp, err := ExecuteRequest(WriteMultipleCoilsRequest{
+		meta:         ADUMeta{Transport: TransportTCP, TransactionID: 0x1314, SlaveID: 0x23},
+		StartAddress: 1,
+		Values:       values,
+	}, image)
+	if err != nil {
+		t.Fatalf("execute request: %v", err)
+	}
+
+	writeResp, ok := resp.(WriteMultipleCoilsResponse)
+	if !ok {
+		t.Fatalf("expected WriteMultipleCoilsResponse, got %T", resp)
+	}
+	if writeResp.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x1314, SlaveID: 0x23}) {
+		t.Fatalf("unexpected response meta: %+v", writeResp.Meta())
+	}
+	if writeResp.StartAddress != 1 || writeResp.Quantity != uint16(len(values)) {
+		t.Fatalf("unexpected write response: %+v", writeResp)
+	}
+	for i, value := range values {
+		if image.coils[1+i] != value {
+			t.Fatalf("unexpected process image coil at %d: %v", 1+i, image.coils[1+i])
+		}
+	}
+}
+
+func TestExecuteRequestWriteMultipleRegisters(t *testing.T) {
+	image := NewMemoryProcessImage(4, 4, 6, 4)
+	values := []uint16{0x0102, 0x0304, 0x0506}
+
+	resp, err := ExecuteRequest(WriteMultipleRegistersRequest{
+		meta:         ADUMeta{Transport: TransportRTU, SlaveID: 0x24},
+		StartAddress: 2,
+		Values:       values,
+	}, image)
+	if err != nil {
+		t.Fatalf("execute request: %v", err)
+	}
+
+	writeResp, ok := resp.(WriteMultipleRegistersResponse)
+	if !ok {
+		t.Fatalf("expected WriteMultipleRegistersResponse, got %T", resp)
+	}
+	if writeResp.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x24}) {
+		t.Fatalf("unexpected response meta: %+v", writeResp.Meta())
+	}
+	if writeResp.StartAddress != 2 || writeResp.Quantity != uint16(len(values)) {
+		t.Fatalf("unexpected write response: %+v", writeResp)
+	}
+	for i, value := range values {
+		if image.holdingRegisters[2+i] != value {
+			t.Fatalf("unexpected process image register at %d: 0x%04x", 2+i, image.holdingRegisters[2+i])
+		}
+	}
+}
+
 func TestExecuteRequestUnsupportedFunctionReturnsException(t *testing.T) {
 	image := NewMemoryProcessImage(1, 1, 1, 1)
 

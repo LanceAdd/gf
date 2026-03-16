@@ -55,6 +55,46 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 			function: typed.FunctionCode(),
 			Values:   values,
 		}, nil
+
+	case WriteSingleCoilRequest:
+		if err := image.WriteSingleCoil(typed.Address, typed.Value); err != nil {
+			return nil, err
+		}
+		return WriteSingleCoilResponse{
+			meta:    typed.Meta(),
+			Address: typed.Address,
+			Value:   typed.Value,
+		}, nil
+
+	case WriteSingleRegisterRequest:
+		if err := image.WriteSingleRegister(typed.Address, typed.Value); err != nil {
+			return nil, err
+		}
+		return WriteSingleRegisterResponse{
+			meta:    typed.Meta(),
+			Address: typed.Address,
+			Value:   typed.Value,
+		}, nil
+
+	case WriteMultipleCoilsRequest:
+		if err := image.WriteMultipleCoils(typed.StartAddress, typed.Values); err != nil {
+			return nil, err
+		}
+		return WriteMultipleCoilsResponse{
+			meta:         typed.Meta(),
+			StartAddress: typed.StartAddress,
+			Quantity:     uint16(len(typed.Values)),
+		}, nil
+
+	case WriteMultipleRegistersRequest:
+		if err := image.WriteMultipleRegisters(typed.StartAddress, typed.Values); err != nil {
+			return nil, err
+		}
+		return WriteMultipleRegistersResponse{
+			meta:         typed.Meta(),
+			StartAddress: typed.StartAddress,
+			Quantity:     uint16(len(typed.Values)),
+		}, nil
 	}
 
 	if !isSupportedFunction(byte(req.FunctionCode())) {
