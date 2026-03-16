@@ -165,6 +165,113 @@ func TestTransportModbusRTUReadsPartialFrameAfterCompletion(t *testing.T) {
 	}
 }
 
+func TestTransportModbusTCPHandlesRequestFrameEndToEnd(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	serverTr := gtransport.New(serverConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	clientTr := gtransport.New(clientConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	defer serverTr.Close()
+	defer clientTr.Close()
+
+	image := modbus.NewMemoryProcessImage(4, 4, 4, 4)
+	_ = image.WriteMultipleRegisters(0, []uint16{0x1234})
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		frame, err := serverTr.ReadFrame()
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		resp, err := modbus.HandleTCPRequestFrame(frame, image)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- serverTr.WriteFrame(resp)
+	}()
+
+	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
+	if err := clientTr.WriteFrame(reqFrame); err != nil {
+		t.Fatalf("client write request frame: %v", err)
+	}
+
+	got, err := clientTr.ReadFrame()
+	if err != nil {
+		t.Fatalf("client read response frame: %v", err)
+	}
+	want := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x05, 0x11, 0x03, 0x02, 0x12, 0x34}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+	if err = <-serverErrCh; err != nil {
+		t.Fatalf("server loop failed: %v", err)
+	}
+}
+
+func TestTransportModbusRTUHandlesRequestFrameEndToEnd(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	serverTr := gtransport.New(serverConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	clientTr := gtransport.New(clientConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	defer serverTr.Close()
+	defer clientTr.Close()
+
+	image := modbus.NewMemoryProcessImage(4, 4, 4, 4)
+	_ = image.WriteMultipleRegisters(0, []uint16{0x1234})
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		frame, err := serverTr.ReadFrame()
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		resp, err := modbus.HandleRTURequestPayload(frame, image)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- serverTr.WriteFrame(resp)
+	}()
+
+	reqPayload := []byte{0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
+	if err := clientTr.WriteFrame(reqPayload); err != nil {
+		t.Fatalf("client write request payload: %v", err)
+	}
+
+	resultCh := make(chan []byte, 1)
+	clientErrCh := make(chan error, 1)
+	go func() {
+		got, err := clientTr.ReadFrame()
+		if err != nil {
+			clientErrCh <- err
+			return
+		}
+		resultCh <- got
+	}()
+
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			t.Fatalf("server loop failed: %v", err)
+		}
+	case got := <-resultCh:
+		want := []byte{0x11, 0x03, 0x02, 0x12, 0x34}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("expected %x, got %x", want, got)
+		}
+	case err := <-clientErrCh:
+		t.Fatalf("client read response payload: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for RTU end-to-end response")
+	}
+}
+
 func appendModbusCRC(payload []byte) []byte {
 	frame := make([]byte, len(payload)+2)
 	copy(frame, payload)

@@ -60,17 +60,36 @@ func TestHandleRTURequestFrameReadDiscreteInputs(t *testing.T) {
 	}
 }
 
-func TestHandleRTURequestFrameWriteMultipleCoils(t *testing.T) {
-	image := NewMemoryProcessImage(6, 4, 4, 4)
+func TestHandleRTURequestPayloadReadDiscreteInputs(t *testing.T) {
+	image := NewMemoryProcessImage(4, 4, 4, 4)
+	image.discreteInputs[0] = true
+	image.discreteInputs[2] = true
+	image.discreteInputs[3] = true
 
-	reqFrame := appendCRC([]byte{0x44, 0x0F, 0x00, 0x01, 0x00, 0x03, 0x01, 0x05})
+	reqFrame := []byte{0x33, 0x02, 0x00, 0x00, 0x00, 0x04}
 
-	got, err := HandleRTURequestFrame(reqFrame, image)
+	got, err := HandleRTURequestPayload(reqFrame, image)
 	if err != nil {
-		t.Fatalf("handle rtu request frame: %v", err)
+		t.Fatalf("handle rtu request payload: %v", err)
 	}
 
-	want := appendCRC([]byte{0x44, 0x0F, 0x00, 0x01, 0x00, 0x03})
+	want := []byte{0x33, 0x02, 0x01, 0x0D}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
+func TestHandleRTURequestPayloadWriteMultipleCoils(t *testing.T) {
+	image := NewMemoryProcessImage(6, 4, 4, 4)
+
+	reqFrame := []byte{0x44, 0x0F, 0x00, 0x01, 0x00, 0x03, 0x01, 0x05}
+
+	got, err := HandleRTURequestPayload(reqFrame, image)
+	if err != nil {
+		t.Fatalf("handle rtu request payload: %v", err)
+	}
+
+	want := []byte{0x44, 0x0F, 0x00, 0x01, 0x00, 0x03}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("expected %x, got %x", want, got)
 	}
@@ -112,6 +131,21 @@ func TestHandleRTURequestFrameExceptionAddressOutOfRange(t *testing.T) {
 	}
 }
 
+func TestHandleRTURequestPayloadExceptionAddressOutOfRange(t *testing.T) {
+	image := NewMemoryProcessImage(1, 1, 1, 1)
+	reqFrame := []byte{0x66, 0x06, 0x00, 0x01, 0x12, 0x34}
+
+	got, err := HandleRTURequestPayload(reqFrame, image)
+	if err != nil {
+		t.Fatalf("handle rtu request payload: %v", err)
+	}
+
+	want := []byte{0x66, 0x86, 0x02}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
 func TestHandleTCPRequestFrameNilImage(t *testing.T) {
 	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
 
@@ -120,10 +154,10 @@ func TestHandleTCPRequestFrameNilImage(t *testing.T) {
 	}
 }
 
-func TestHandleRTURequestFrameNilImage(t *testing.T) {
-	reqFrame := appendCRC([]byte{0x11, 0x01, 0x00, 0x00, 0x00, 0x01})
+func TestHandleRTURequestPayloadNilImage(t *testing.T) {
+	reqFrame := []byte{0x11, 0x01, 0x00, 0x00, 0x00, 0x01}
 
-	if _, err := HandleRTURequestFrame(reqFrame, nil); err == nil {
+	if _, err := HandleRTURequestPayload(reqFrame, nil); err == nil {
 		t.Fatal("expected nil image error")
 	}
 }
@@ -136,10 +170,10 @@ func TestHandleTCPRequestFrameInvalidFrame(t *testing.T) {
 	}
 }
 
-func TestHandleRTURequestFrameInvalidFrame(t *testing.T) {
-	reqFrame := []byte{0x11, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00}
+func TestHandleRTURequestPayloadInvalidFrame(t *testing.T) {
+	reqFrame := []byte{0x11, 0x01, 0x00, 0x00}
 
-	if _, err := HandleRTURequestFrame(reqFrame, NewMemoryProcessImage(1, 1, 1, 1)); err == nil {
+	if _, err := HandleRTURequestPayload(reqFrame, NewMemoryProcessImage(1, 1, 1, 1)); err == nil {
 		t.Fatal("expected invalid rtu frame error")
 	}
 }
