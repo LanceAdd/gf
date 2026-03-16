@@ -150,6 +150,13 @@ if err != nil {
 }
 ```
 
+### Modbus 示例
+
+- `example/modbus_recommended` 展示默认推荐的高层路径，围绕
+  `HandleTCPRequestFrame` 组织。
+- `example/modbus_advanced` 展示底层可组合路径，围绕
+  `ParseTCPRequest`、`ExecuteRequest` 和 `EncodeTCPResponse` 组织。
+
 ## 示例
 
 ```go

@@ -159,6 +159,13 @@ if err != nil {
 }
 ```
 
+### Modbus Examples
+
+- `example/modbus_recommended` shows the default high-level path built around
+  `HandleTCPRequestFrame`.
+- `example/modbus_advanced` shows the lower-level composable path built around
+  `ParseTCPRequest`, `ExecuteRequest`, and `EncodeTCPResponse`.
+
 ## Example
 
 ```go
