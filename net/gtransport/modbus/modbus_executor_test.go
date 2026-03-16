@@ -1,6 +1,9 @@
 package modbus
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestExecuteRequestReadCoils(t *testing.T) {
 	image := NewMemoryProcessImage(4, 4, 4, 4)
@@ -262,6 +265,140 @@ func TestExecuteRequestWriteMultipleRegisters(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestExceptionAddressOutOfRange(t *testing.T) {
+	image := NewMemoryProcessImage(2, 2, 2, 2)
+
+	resp, err := ExecuteRequest(ReadCoilsRequest{
+		meta:         ADUMeta{Transport: TransportTCP, TransactionID: 0x2122, SlaveID: 0x31},
+		StartAddress: 1,
+		Quantity:     2,
+	}, image)
+	if err != nil {
+		t.Fatalf("expected exception response, got error: %v", err)
+	}
+
+	exceptionResp, ok := resp.(ExceptionResponse)
+	if !ok {
+		t.Fatalf("expected ExceptionResponse, got %T", resp)
+	}
+	if exceptionResp.Meta() != (ADUMeta{Transport: TransportTCP, TransactionID: 0x2122, SlaveID: 0x31}) {
+		t.Fatalf("unexpected exception meta: %+v", exceptionResp.Meta())
+	}
+	if exceptionResp.FunctionCode() != FunctionCode(0x01) {
+		t.Fatalf("unexpected function code: 0x%02x", byte(exceptionResp.FunctionCode()))
+	}
+	if exceptionResp.ExceptionCode != 0x02 {
+		t.Fatalf("unexpected exception code: 0x%02x", exceptionResp.ExceptionCode)
+	}
+}
+
+func TestExecuteRequestExceptionInvalidQuantity(t *testing.T) {
+	image := NewMemoryProcessImage(2, 2, 2, 2)
+
+	resp, err := ExecuteRequest(ReadHoldingRegistersRequest{
+		meta:         ADUMeta{Transport: TransportRTU, SlaveID: 0x32},
+		StartAddress: 0,
+		Quantity:     0,
+	}, image)
+	if err != nil {
+		t.Fatalf("expected exception response, got error: %v", err)
+	}
+
+	exceptionResp, ok := resp.(ExceptionResponse)
+	if !ok {
+		t.Fatalf("expected ExceptionResponse, got %T", resp)
+	}
+	if exceptionResp.FunctionCode() != FunctionCode(0x03) {
+		t.Fatalf("unexpected function code: 0x%02x", byte(exceptionResp.FunctionCode()))
+	}
+	if exceptionResp.ExceptionCode != 0x03 {
+		t.Fatalf("unexpected exception code: 0x%02x", exceptionResp.ExceptionCode)
+	}
+}
+
+func TestExecuteRequestExceptionWriteValuesEmpty(t *testing.T) {
+	image := NewMemoryProcessImage(2, 2, 2, 2)
+
+	resp, err := ExecuteRequest(WriteMultipleRegistersRequest{
+		meta:         ADUMeta{Transport: TransportTCP, TransactionID: 0x2324, SlaveID: 0x33},
+		StartAddress: 0,
+		Values:       nil,
+	}, image)
+	if err != nil {
+		t.Fatalf("expected exception response, got error: %v", err)
+	}
+
+	exceptionResp, ok := resp.(ExceptionResponse)
+	if !ok {
+		t.Fatalf("expected ExceptionResponse, got %T", resp)
+	}
+	if exceptionResp.FunctionCode() != FunctionCode(0x10) {
+		t.Fatalf("unexpected function code: 0x%02x", byte(exceptionResp.FunctionCode()))
+	}
+	if exceptionResp.ExceptionCode != 0x03 {
+		t.Fatalf("unexpected exception code: 0x%02x", exceptionResp.ExceptionCode)
+	}
+}
+
+func TestExecuteRequestInternalError(t *testing.T) {
+	wantErr := errors.New("boom")
+
+	resp, err := ExecuteRequest(ReadInputRegistersRequest{
+		meta:         ADUMeta{Transport: TransportRTU, SlaveID: 0x34},
+		StartAddress: 0,
+		Quantity:     1,
+	}, failingProcessImage{err: wantErr})
+	if err == nil {
+		t.Fatal("expected internal error")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil response on internal error, got %T", resp)
+	}
+}
+
+func TestExecuteRequestSupportedFunctionWithoutImplementationReturnsError(t *testing.T) {
+	image := NewMemoryProcessImage(1, 1, 1, 1)
+
+	resp, err := ExecuteRequest(supportedButUnknownRequest{
+		meta:     ADUMeta{Transport: TransportTCP, TransactionID: 0x2526, SlaveID: 0x35},
+		function: FunctionCode(0x03),
+	}, image)
+	if err == nil {
+		t.Fatal("expected unsupported implementation error")
+	}
+	if resp != nil {
+		t.Fatalf("expected nil response on unsupported implementation, got %T", resp)
+	}
+}
+
+func TestExecuteRequestSlaveIDZeroStillReturnsResponse(t *testing.T) {
+	image := NewMemoryProcessImage(2, 2, 2, 2)
+	_ = image.WriteMultipleCoils(0, []bool{true})
+
+	resp, err := ExecuteRequest(ReadCoilsRequest{
+		meta:         ADUMeta{Transport: TransportRTU, SlaveID: 0},
+		StartAddress: 0,
+		Quantity:     1,
+	}, image)
+	if err != nil {
+		t.Fatalf("execute request: %v", err)
+	}
+
+	readResp, ok := resp.(ReadBitsResponse)
+	if !ok {
+		t.Fatalf("expected ReadBitsResponse, got %T", resp)
+	}
+	if readResp.Meta().SlaveID != 0 {
+		t.Fatalf("unexpected slave id: %d", readResp.Meta().SlaveID)
+	}
+	if len(readResp.Values) != 1 || !readResp.Values[0] {
+		t.Fatalf("unexpected response values: %+v", readResp.Values)
+	}
+}
+
 func TestExecuteRequestUnsupportedFunctionReturnsException(t *testing.T) {
 	image := NewMemoryProcessImage(1, 1, 1, 1)
 
@@ -312,4 +449,54 @@ func (r unsupportedRequest) FunctionCode() FunctionCode {
 	return r.function
 }
 
+type supportedButUnknownRequest struct {
+	meta     ADUMeta
+	function FunctionCode
+}
+
+func (r supportedButUnknownRequest) Meta() ADUMeta {
+	return r.meta
+}
+
+func (r supportedButUnknownRequest) FunctionCode() FunctionCode {
+	return r.function
+}
+
+type failingProcessImage struct {
+	err error
+}
+
+func (f failingProcessImage) ReadCoils(start uint16, quantity uint16) ([]bool, error) {
+	return nil, f.err
+}
+
+func (f failingProcessImage) ReadDiscreteInputs(start uint16, quantity uint16) ([]bool, error) {
+	return nil, f.err
+}
+
+func (f failingProcessImage) ReadHoldingRegisters(start uint16, quantity uint16) ([]uint16, error) {
+	return nil, f.err
+}
+
+func (f failingProcessImage) ReadInputRegisters(start uint16, quantity uint16) ([]uint16, error) {
+	return nil, f.err
+}
+
+func (f failingProcessImage) WriteSingleCoil(address uint16, value bool) error {
+	return f.err
+}
+
+func (f failingProcessImage) WriteSingleRegister(address uint16, value uint16) error {
+	return f.err
+}
+
+func (f failingProcessImage) WriteMultipleCoils(start uint16, values []bool) error {
+	return f.err
+}
+
+func (f failingProcessImage) WriteMultipleRegisters(start uint16, values []uint16) error {
+	return f.err
+}
+
 var _ Request = unsupportedRequest{}
+var _ Request = supportedButUnknownRequest{}

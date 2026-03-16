@@ -1,6 +1,9 @@
 package modbus
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ExecuteRequest runs a typed Modbus request against a process image.
 func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
@@ -15,7 +18,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	case ReadCoilsRequest:
 		values, err := image.ReadCoils(typed.StartAddress, typed.Quantity)
 		if err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return ReadBitsResponse{
 			meta:     typed.Meta(),
@@ -26,7 +29,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	case ReadDiscreteInputsRequest:
 		values, err := image.ReadDiscreteInputs(typed.StartAddress, typed.Quantity)
 		if err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return ReadBitsResponse{
 			meta:     typed.Meta(),
@@ -37,7 +40,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	case ReadHoldingRegistersRequest:
 		values, err := image.ReadHoldingRegisters(typed.StartAddress, typed.Quantity)
 		if err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return ReadRegistersResponse{
 			meta:     typed.Meta(),
@@ -48,7 +51,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	case ReadInputRegistersRequest:
 		values, err := image.ReadInputRegisters(typed.StartAddress, typed.Quantity)
 		if err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return ReadRegistersResponse{
 			meta:     typed.Meta(),
@@ -58,7 +61,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 
 	case WriteSingleCoilRequest:
 		if err := image.WriteSingleCoil(typed.Address, typed.Value); err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return WriteSingleCoilResponse{
 			meta:    typed.Meta(),
@@ -68,7 +71,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 
 	case WriteSingleRegisterRequest:
 		if err := image.WriteSingleRegister(typed.Address, typed.Value); err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return WriteSingleRegisterResponse{
 			meta:    typed.Meta(),
@@ -78,7 +81,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 
 	case WriteMultipleCoilsRequest:
 		if err := image.WriteMultipleCoils(typed.StartAddress, typed.Values); err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return WriteMultipleCoilsResponse{
 			meta:         typed.Meta(),
@@ -88,7 +91,7 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 
 	case WriteMultipleRegistersRequest:
 		if err := image.WriteMultipleRegisters(typed.StartAddress, typed.Values); err != nil {
-			return nil, err
+			return handleExecuteError(typed, err)
 		}
 		return WriteMultipleRegistersResponse{
 			meta:         typed.Meta(),
@@ -106,4 +109,27 @@ func ExecuteRequest(req Request, image ProcessImage) (Response, error) {
 	}
 
 	return nil, fmt.Errorf("modbus request type %T is not executable", req)
+}
+
+func handleExecuteError(req Request, err error) (Response, error) {
+	exceptionCode, ok := mapProcessImageExceptionCode(err)
+	if !ok {
+		return nil, err
+	}
+	return ExceptionResponse{
+		meta:          req.Meta(),
+		function:      req.FunctionCode(),
+		ExceptionCode: exceptionCode,
+	}, nil
+}
+
+func mapProcessImageExceptionCode(err error) (byte, bool) {
+	switch {
+	case errors.Is(err, ErrProcessImageAddressOutOfRange):
+		return 0x02, true
+	case errors.Is(err, ErrProcessImageQuantityOutOfRange), errors.Is(err, ErrProcessImageWriteValuesEmpty):
+		return 0x03, true
+	default:
+		return 0, false
+	}
 }
