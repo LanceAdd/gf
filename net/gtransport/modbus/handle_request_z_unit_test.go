@@ -81,3 +81,73 @@ func TestHandleRTURequestFrameWriteMultipleCoils(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleTCPRequestFrameExceptionAddressOutOfRange(t *testing.T) {
+	image := NewMemoryProcessImage(2, 2, 1, 2)
+	reqFrame := []byte{0x10, 0x20, 0x00, 0x00, 0x00, 0x06, 0x55, 0x03, 0x00, 0x00, 0x00, 0x02}
+
+	got, err := HandleTCPRequestFrame(reqFrame, image)
+	if err != nil {
+		t.Fatalf("handle tcp request frame: %v", err)
+	}
+
+	want := []byte{0x10, 0x20, 0x00, 0x00, 0x00, 0x03, 0x55, 0x83, 0x02}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
+func TestHandleRTURequestFrameExceptionAddressOutOfRange(t *testing.T) {
+	image := NewMemoryProcessImage(1, 1, 1, 1)
+	reqFrame := appendCRC([]byte{0x66, 0x06, 0x00, 0x01, 0x12, 0x34})
+
+	got, err := HandleRTURequestFrame(reqFrame, image)
+	if err != nil {
+		t.Fatalf("handle rtu request frame: %v", err)
+	}
+
+	want := appendCRC([]byte{0x66, 0x86, 0x02})
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
+func TestHandleTCPRequestFrameNilImage(t *testing.T) {
+	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
+
+	if _, err := HandleTCPRequestFrame(reqFrame, nil); err == nil {
+		t.Fatal("expected nil image error")
+	}
+}
+
+func TestHandleRTURequestFrameNilImage(t *testing.T) {
+	reqFrame := appendCRC([]byte{0x11, 0x01, 0x00, 0x00, 0x00, 0x01})
+
+	if _, err := HandleRTURequestFrame(reqFrame, nil); err == nil {
+		t.Fatal("expected nil image error")
+	}
+}
+
+func TestHandleTCPRequestFrameInvalidFrame(t *testing.T) {
+	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x03, 0x00}
+
+	if _, err := HandleTCPRequestFrame(reqFrame, NewMemoryProcessImage(1, 1, 1, 1)); err == nil {
+		t.Fatal("expected invalid tcp frame error")
+	}
+}
+
+func TestHandleRTURequestFrameInvalidFrame(t *testing.T) {
+	reqFrame := []byte{0x11, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00}
+
+	if _, err := HandleRTURequestFrame(reqFrame, NewMemoryProcessImage(1, 1, 1, 1)); err == nil {
+		t.Fatal("expected invalid rtu frame error")
+	}
+}
+
+func TestHandleTCPRequestFrameInvalidFunction(t *testing.T) {
+	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x11, 0x00, 0x00, 0x00, 0x01}
+
+	if _, err := HandleTCPRequestFrame(reqFrame, NewMemoryProcessImage(1, 1, 1, 1)); err == nil {
+		t.Fatal("expected unsupported function parse error")
+	}
+}
