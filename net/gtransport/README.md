@@ -163,6 +163,8 @@ return tr.WriteFrame(context.Background(), respFrame)
 
 RTU semantics stay explicit:
 
+- `modbus.NewTCP()` is transport-oriented: its `Decode` scans the byte stream, may discard malformed candidates as noise, and resynchronizes to the next valid TCP ADU
+- `ParseTCPRequest` is the strict frame validator/parser to use when callers need protocol-level errors for a specific Modbus TCP ADU
 - `ParseRTURequest` / `EncodeRTUResponse` operate on raw RTU ADUs with CRC
 - `ParseRTURequestPayload` / `EncodeRTUResponsePayload` operate on CRC-stripped RTU payloads returned by `modbus.NewRTU()`
 - `ExecuteRequest` is optional; callers can also route typed requests into their own business/storage layers

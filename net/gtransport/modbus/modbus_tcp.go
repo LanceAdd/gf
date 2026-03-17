@@ -18,31 +18,52 @@ const (
 // encode.
 type tcpCodec struct{}
 
-// Decode returns one complete Modbus TCP ADU from the input buffer.
+// Decode scans the buffered byte stream for the next valid Modbus TCP ADU.
+// It may discard malformed candidates as noise so the transport can
+// resynchronize and continue reading later frames from the same connection.
 func (c tcpCodec) Decode(in []byte) ([]byte, int, error) {
 	if len(in) < tcpHeaderLength {
 		return nil, 0, gtransport.ErrNeedMoreData
 	}
-	if protocolID := binary.BigEndian.Uint16(in[2:4]); protocolID != tcpProtocolID {
-		return nil, 0, fmt.Errorf("invalid modbus tcp protocol id %d", protocolID)
+	lastCandidateStart := len(in) - tcpHeaderLength
+	partialCandidateStart := -1
+	for start := 0; start <= lastCandidateStart; start++ {
+		protocolID := binary.BigEndian.Uint16(in[start+2 : start+4])
+		if protocolID != tcpProtocolID {
+			continue
+		}
+		length := int(binary.BigEndian.Uint16(in[start+4 : start+6]))
+		if length < tcpMinLength || length > tcpMaxLength {
+			continue
+		}
+		// The MBAP length field counts Unit/Slave ID plus PDU bytes, so the full
+		// ADU size is the 6-byte prefix before the field plus the declared length.
+		frameLength := 6 + length
+		if frameLength < tcpHeaderLength {
+			continue
+		}
+		if len(in[start:]) < frameLength {
+			if partialCandidateStart < 0 {
+				partialCandidateStart = start
+			}
+			continue
+		}
+		end := start + frameLength
+		if err := validateModbusPayload(in[start+6 : end]); err != nil {
+			continue
+		}
+		return in[start:end], end, nil
 	}
-	length := int(binary.BigEndian.Uint16(in[4:6]))
-	if length < tcpMinLength || length > tcpMaxLength {
-		return nil, 0, fmt.Errorf("invalid modbus tcp length %d", length)
+	if partialCandidateStart >= 0 {
+		return nil, partialCandidateStart, gtransport.ErrNeedMoreData
 	}
-	// The MBAP length field counts Unit/Slave ID plus PDU bytes, so the full
-	// ADU size is the 6-byte prefix before the field plus the declared length.
-	frameLength := 6 + length
-	if frameLength < tcpHeaderLength {
-		return nil, 0, fmt.Errorf("invalid modbus tcp frame length %d", frameLength)
+	// No full header candidate was usable. Preserve the trailing bytes that
+	// could still become the start of a future MBAP header once more data arrives.
+	consumed := len(in) - (tcpHeaderLength - 1)
+	if consumed < 0 {
+		consumed = 0
 	}
-	if len(in) < frameLength {
-		return nil, 0, gtransport.ErrNeedMoreData
-	}
-	if err := validateModbusPayload(in[6:frameLength]); err != nil {
-		return nil, 0, err
-	}
-	return in[:frameLength], frameLength, nil
+	return nil, consumed, gtransport.ErrNeedMoreData
 }
 
 // Encode validates a Modbus TCP ADU and rewrites the MBAP length field from

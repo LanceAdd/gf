@@ -159,6 +159,8 @@ return tr.WriteFrame(context.Background(), respFrame)
 
 RTU 语义需要严格区分：
 
+- `modbus.NewTCP()` 偏向 transport 层：其 `Decode` 会在字节流中扫描，必要时把非法候选当作噪声丢弃，并重同步到下一条合法 TCP ADU
+- `ParseTCPRequest` 是严格的一帧一验解析入口；如果调用方需要拿到某个 Modbus TCP ADU 的明确协议错误，应使用它
 - `ParseRTURequest` / `EncodeRTUResponse` 面向带 CRC 的原始 RTU ADU
 - `ParseRTURequestPayload` / `EncodeRTUResponsePayload` 面向 `modbus.NewRTU()` 返回的去 CRC RTU payload
 - `ExecuteRequest` 只是默认执行层，调用方也可以把 typed request 接到自己的业务或存储层

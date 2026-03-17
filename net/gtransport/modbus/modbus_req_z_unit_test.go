@@ -51,6 +51,33 @@ func TestParseTCPRequestReadHoldingRegisters(t *testing.T) {
 	}
 }
 
+func TestParseTCPRequestRejectsProtocolID(t *testing.T) {
+	frame := []byte{0x00, 0x01, 0x00, 0x01, 0x00, 0x06, 0x01, 0x03, 0x00, 0x00, 0x00, 0x0A}
+
+	_, err := ParseTCPRequest(frame)
+	if err == nil || !strings.Contains(err.Error(), "invalid modbus tcp protocol id") {
+		t.Fatalf("expected protocol id error, got %v", err)
+	}
+}
+
+func TestParseTCPRequestRejectsMalformedExceptionLength(t *testing.T) {
+	frame := []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x01, 0x83, 0x02, 0x00}
+
+	_, err := ParseTCPRequest(frame)
+	if err == nil || !strings.Contains(err.Error(), "invalid modbus exception length") {
+		t.Fatalf("expected exception length error, got %v", err)
+	}
+}
+
+func TestParseTCPRequestRejectsUnsupportedExceptionFunction(t *testing.T) {
+	frame := []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x03, 0x01, 0x91, 0x01}
+
+	_, err := ParseTCPRequest(frame)
+	if err == nil || !strings.Contains(err.Error(), "unsupported modbus function code") {
+		t.Fatalf("expected unsupported function error, got %v", err)
+	}
+}
+
 func TestParseRTURequestReadDiscreteInputs(t *testing.T) {
 	frame := appendCRC([]byte{0x33, 0x02, 0x00, 0x20, 0x00, 0x08})
 
