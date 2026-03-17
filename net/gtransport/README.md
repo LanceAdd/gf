@@ -161,17 +161,11 @@ if err != nil {
 return tr.WriteFrame(context.Background(), respFrame)
 ```
 
-Convenience helper flow still exists when you want less boilerplate:
-
-```go
-respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
-```
-
 RTU semantics stay explicit:
 
 - `ParseRTURequest` / `EncodeRTUResponse` operate on raw RTU ADUs with CRC
 - `ParseRTURequestPayload` / `EncodeRTUResponsePayload` operate on CRC-stripped RTU payloads returned by `modbus.NewRTU()`
-- `HandleRTURequestPayload` is the convenience wrapper around that payload path
+- `ExecuteRequest` is optional; callers can also route typed requests into their own business/storage layers
 
 Example modules:
 

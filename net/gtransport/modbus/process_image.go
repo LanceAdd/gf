@@ -15,6 +15,9 @@ var (
 )
 
 // ProcessImage stores the four Modbus data areas.
+//
+// The interface does not impose any concurrency policy. Implementations may be
+// concurrent-safe or externally synchronized depending on deployment needs.
 type ProcessImage interface {
 	// ReadCoils returns coil values starting at start for quantity items.
 	ReadCoils(start uint16, quantity uint16) ([]bool, error)

@@ -1,6 +1,6 @@
 // Package modbus provides Modbus protocol support for gtransport.
 //
-// Composable APIs:
+// Primary composable APIs:
 //   - ParseTCPRequest
 //   - ParseRTURequest
 //   - ParseRTURequestPayload
@@ -12,11 +12,6 @@
 //   - ExecuteRequest
 //   - ProcessImage
 //
-// Convenience helpers:
-//   - HandleTCPRequestFrame
-//   - HandleRTURequestFrame
-//   - HandleRTURequestPayload
-//
 // Shared protocol models:
 //   - typed Modbus request/response models
 //   - ProcessImage
@@ -25,6 +20,9 @@
 //   - TCP frame: full Modbus TCP ADU
 //   - RTU frame: raw Modbus RTU ADU with CRC
 //   - RTU payload: CRC-stripped content returned by gtransport.Wrap(..., NewRTU())
+//
+// The recommended flow for bottom-layer integrations is:
+// Parse* -> ExecuteRequest (or custom routing) -> Encode*
 package modbus
 
 import "github.com/gogf/gf/v2/net/gtransport"

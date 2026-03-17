@@ -1,6 +1,9 @@
 package modbus
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestMemoryProcessImageReadWithinBounds(t *testing.T) {
 	image := NewMemoryProcessImage(4, 4, 4, 4)
@@ -189,4 +192,51 @@ func TestMemoryProcessImageNegativeCountsClampToZero(t *testing.T) {
 	if err := image.WriteSingleRegister(0, 1); err == nil {
 		t.Fatal("expected out-of-range error for zero-length holding registers")
 	}
+}
+
+func TestMemoryProcessImageConcurrentReadWrite(t *testing.T) {
+	image := NewMemoryProcessImage(8, 8, 8, 8)
+	if err := image.WriteMultipleRegisters(0, []uint16{1, 2, 3, 4}); err != nil {
+		t.Fatalf("seed holding registers: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := range 4 {
+		wg.Add(1)
+		go func(offset int) {
+			defer wg.Done()
+			<-start
+			for j := range 200 {
+				address := uint16((offset + j) % 4)
+				if err := image.WriteSingleRegister(address, uint16(offset+j)); err != nil {
+					t.Errorf("write single register: %v", err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 200 {
+				values, err := image.ReadHoldingRegisters(0, 4)
+				if err != nil {
+					t.Errorf("read holding registers: %v", err)
+					return
+				}
+				if len(values) != 4 {
+					t.Errorf("expected 4 values, got %d", len(values))
+					return
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
 }

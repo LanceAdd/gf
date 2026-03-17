@@ -197,6 +197,12 @@ func EncodeRTUResponse(resp Response) ([]byte, error) {
 	return out, nil
 }
 
+// EncodeRTUResponsePayload encodes a typed response back into CRC-stripped RTU
+// payload bytes for transport-level writing.
+func EncodeRTUResponsePayload(resp Response) ([]byte, error) {
+	return encodeResponsePayload(resp)
+}
+
 // encodeResponsePayload turns a typed response into the shared Modbus payload
 // body before transport-specific wrapping.
 func encodeResponsePayload(resp Response) ([]byte, error) {

@@ -212,6 +212,19 @@ func ParseRTURequest(frame []byte) (Request, error) {
 	return parseRequest(meta, payload)
 }
 
+// ParseRTURequestPayload reconstructs a typed request from the CRC-stripped
+// payload returned by the RTU transport codec.
+func ParseRTURequestPayload(payload []byte) (Request, error) {
+	if err := validateModbusPayload(payload); err != nil {
+		return nil, err
+	}
+	meta := ADUMeta{
+		Transport: TransportRTU,
+		SlaveID:   payload[0],
+	}
+	return parseRequest(meta, payload)
+}
+
 // normalizeRTURequestPayload verifies the trailing CRC and returns the payload
 // bytes that are shared with the higher-level request parser.
 func normalizeRTURequestPayload(frame []byte) ([]byte, error) {

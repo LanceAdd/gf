@@ -1,12 +1,15 @@
 package modbus
 
-import "slices"
+import (
+	"slices"
+	"sync"
+)
 
 // MemoryProcessImage stores Modbus data areas in contiguous in-memory slices.
 //
-// MemoryProcessImage is NOT safe for concurrent use. Callers that share a
-// single image across goroutines must provide their own synchronization.
+// MemoryProcessImage is safe for concurrent use at single-call granularity.
 type MemoryProcessImage struct {
+	mu               sync.RWMutex
 	coils            []bool
 	discreteInputs   []bool
 	holdingRegisters []uint16
@@ -34,26 +37,36 @@ func NewMemoryProcessImage(
 
 // ReadCoils implements ProcessImage.ReadCoils.
 func (m *MemoryProcessImage) ReadCoils(start uint16, quantity uint16) ([]bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return readBoolRange(m.coils, start, quantity)
 }
 
 // ReadDiscreteInputs implements ProcessImage.ReadDiscreteInputs.
 func (m *MemoryProcessImage) ReadDiscreteInputs(start uint16, quantity uint16) ([]bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return readBoolRange(m.discreteInputs, start, quantity)
 }
 
 // ReadHoldingRegisters implements ProcessImage.ReadHoldingRegisters.
 func (m *MemoryProcessImage) ReadHoldingRegisters(start uint16, quantity uint16) ([]uint16, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return readUint16Range(m.holdingRegisters, start, quantity)
 }
 
 // ReadInputRegisters implements ProcessImage.ReadInputRegisters.
 func (m *MemoryProcessImage) ReadInputRegisters(start uint16, quantity uint16) ([]uint16, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return readUint16Range(m.inputRegisters, start, quantity)
 }
 
 // WriteSingleCoil implements ProcessImage.WriteSingleCoil.
 func (m *MemoryProcessImage) WriteSingleCoil(address uint16, value bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	index := int(address)
 	if index >= len(m.coils) {
 		return ErrProcessImageAddressOutOfRange
@@ -64,6 +77,8 @@ func (m *MemoryProcessImage) WriteSingleCoil(address uint16, value bool) error {
 
 // WriteSingleRegister implements ProcessImage.WriteSingleRegister.
 func (m *MemoryProcessImage) WriteSingleRegister(address uint16, value uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	index := int(address)
 	if index >= len(m.holdingRegisters) {
 		return ErrProcessImageAddressOutOfRange
@@ -74,6 +89,8 @@ func (m *MemoryProcessImage) WriteSingleRegister(address uint16, value uint16) e
 
 // WriteMultipleCoils implements ProcessImage.WriteMultipleCoils.
 func (m *MemoryProcessImage) WriteMultipleCoils(start uint16, values []bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(values) == 0 {
 		return ErrProcessImageWriteValuesEmpty
 	}
@@ -87,6 +104,8 @@ func (m *MemoryProcessImage) WriteMultipleCoils(start uint16, values []bool) err
 
 // WriteMultipleRegisters implements ProcessImage.WriteMultipleRegisters.
 func (m *MemoryProcessImage) WriteMultipleRegisters(start uint16, values []uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(values) == 0 {
 		return ErrProcessImageWriteValuesEmpty
 	}

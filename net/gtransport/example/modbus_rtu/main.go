@@ -39,11 +39,19 @@ func main() {
 				errCh <- fmt.Errorf("server read %d: %w", i, err)
 				return
 			}
-			// HandleRTURequestPayload processes the CRC-stripped payload
-			// against the process image and returns a CRC-stripped response.
-			respPayload, err := modbus.HandleRTURequestPayload(payload, image)
+			req, err := modbus.ParseRTURequestPayload(payload)
 			if err != nil {
-				errCh <- fmt.Errorf("server handle %d: %w", i, err)
+				errCh <- fmt.Errorf("server parse %d: %w", i, err)
+				return
+			}
+			resp, err := modbus.ExecuteRequest(req, image)
+			if err != nil {
+				errCh <- fmt.Errorf("server execute %d: %w", i, err)
+				return
+			}
+			respPayload, err := modbus.EncodeRTUResponsePayload(resp)
+			if err != nil {
+				errCh <- fmt.Errorf("server encode %d: %w", i, err)
 				return
 			}
 			// WriteFrame passes the payload through the RTU codec which adds CRC.

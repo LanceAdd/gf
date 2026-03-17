@@ -186,12 +186,22 @@ func TestTransportModbusTCPHandlesRequestFrameEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		resp, err := modbus.HandleTCPRequestFrame(frame, image)
+		req, err := modbus.ParseTCPRequest(frame)
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
+		resp, err := modbus.ExecuteRequest(req, image)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		encoded, err := modbus.EncodeTCPResponse(resp)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- serverTr.WriteFrame(context.Background(), encoded)
 	}()
 
 	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
@@ -232,12 +242,22 @@ func TestTransportModbusRTUHandlesRequestFrameEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		resp, err := modbus.HandleRTURequestPayload(frame, image)
+		req, err := modbus.ParseRTURequestPayload(frame)
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
+		resp, err := modbus.ExecuteRequest(req, image)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		encoded, err := modbus.EncodeRTUResponsePayload(resp)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- serverTr.WriteFrame(context.Background(), encoded)
 	}()
 
 	reqPayload := []byte{0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
@@ -292,12 +312,22 @@ func TestTransportModbusTCPHandlesExceptionResponseEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		resp, err := modbus.HandleTCPRequestFrame(frame, image)
+		req, err := modbus.ParseTCPRequest(frame)
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
+		resp, err := modbus.ExecuteRequest(req, image)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		encoded, err := modbus.EncodeTCPResponse(resp)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- serverTr.WriteFrame(context.Background(), encoded)
 	}()
 
 	reqFrame := []byte{0x10, 0x20, 0x00, 0x00, 0x00, 0x06, 0x55, 0x03, 0x00, 0x00, 0x00, 0x02}
@@ -337,12 +367,22 @@ func TestTransportModbusRTUHandlesExceptionResponseEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		resp, err := modbus.HandleRTURequestPayload(frame, image)
+		req, err := modbus.ParseRTURequestPayload(frame)
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
+		resp, err := modbus.ExecuteRequest(req, image)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		encoded, err := modbus.EncodeRTUResponsePayload(resp)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- serverTr.WriteFrame(context.Background(), encoded)
 	}()
 
 	reqPayload := []byte{0x66, 0x06, 0x00, 0x01, 0x12, 0x34}

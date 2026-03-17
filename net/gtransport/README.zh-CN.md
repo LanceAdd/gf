@@ -157,17 +157,11 @@ if err != nil {
 return tr.WriteFrame(context.Background(), respFrame)
 ```
 
-如果你只想减少样板代码，也仍然可以使用 helper 流程：
-
-```go
-respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
-```
-
 RTU 语义需要严格区分：
 
 - `ParseRTURequest` / `EncodeRTUResponse` 面向带 CRC 的原始 RTU ADU
 - `ParseRTURequestPayload` / `EncodeRTUResponsePayload` 面向 `modbus.NewRTU()` 返回的去 CRC RTU payload
-- `HandleRTURequestPayload` 是这条 payload 路径上的便捷封装
+- `ExecuteRequest` 只是默认执行层，调用方也可以把 typed request 接到自己的业务或存储层
 
 示例模块：
 
