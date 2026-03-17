@@ -2,6 +2,7 @@ package gtransport_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"net"
 	"testing"
@@ -16,7 +17,7 @@ func TestTransportModbusTCPReadsStickyFrames(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	tr := gtransport.New(client, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	tr := gtransport.Wrap(client, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
 	defer tr.Close()
 
 	frame1 := []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x01, 0x03, 0x00, 0x00, 0x00, 0x01}
@@ -26,11 +27,11 @@ func TestTransportModbusTCPReadsStickyFrames(t *testing.T) {
 		_, _ = server.Write(append(frame1, frame2...))
 	}()
 
-	got1, err := tr.ReadFrame()
+	got1, err := tr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("read first frame: %v", err)
 	}
-	got2, err := tr.ReadFrame()
+	got2, err := tr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("read second frame: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestTransportModbusTCPReadsPartialFrameAfterCompletion(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	tr := gtransport.New(client, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	tr := gtransport.Wrap(client, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
 	defer tr.Close()
 
 	frame := []byte{0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x01, 0x03, 0x00, 0x00, 0x00, 0x01}
@@ -55,7 +56,7 @@ func TestTransportModbusTCPReadsPartialFrameAfterCompletion(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		got, err := tr.ReadFrame()
+		got, err := tr.ReadFrame(context.Background())
 		if err != nil {
 			errCh <- err
 			return
@@ -96,7 +97,7 @@ func TestTransportModbusRTUReadsFrameAfterNoisePrefix(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	tr := gtransport.New(client, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	tr := gtransport.Wrap(client, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
 	defer tr.Close()
 
 	payload := []byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x01}
@@ -106,7 +107,7 @@ func TestTransportModbusRTUReadsFrameAfterNoisePrefix(t *testing.T) {
 		_, _ = server.Write(frame)
 	}()
 
-	got, err := tr.ReadFrame()
+	got, err := tr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("read frame: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestTransportModbusRTUReadsPartialFrameAfterCompletion(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	tr := gtransport.New(client, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	tr := gtransport.Wrap(client, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
 	defer tr.Close()
 
 	payload := []byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x01}
@@ -129,7 +130,7 @@ func TestTransportModbusRTUReadsPartialFrameAfterCompletion(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		got, err := tr.ReadFrame()
+		got, err := tr.ReadFrame(context.Background())
 		if err != nil {
 			errCh <- err
 			return
@@ -170,8 +171,8 @@ func TestTransportModbusTCPHandlesRequestFrameEndToEnd(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	serverTr := gtransport.New(serverConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
-	clientTr := gtransport.New(clientConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	serverTr := gtransport.Wrap(serverConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	clientTr := gtransport.Wrap(clientConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
 	defer serverTr.Close()
 	defer clientTr.Close()
 
@@ -180,7 +181,7 @@ func TestTransportModbusTCPHandlesRequestFrameEndToEnd(t *testing.T) {
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		frame, err := serverTr.ReadFrame()
+		frame, err := serverTr.ReadFrame(context.Background())
 		if err != nil {
 			serverErrCh <- err
 			return
@@ -190,15 +191,15 @@ func TestTransportModbusTCPHandlesRequestFrameEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(resp)
+		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
 	}()
 
 	reqFrame := []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x06, 0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
-	if err := clientTr.WriteFrame(reqFrame); err != nil {
+	if err := clientTr.WriteFrame(context.Background(), reqFrame); err != nil {
 		t.Fatalf("client write request frame: %v", err)
 	}
 
-	got, err := clientTr.ReadFrame()
+	got, err := clientTr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("client read response frame: %v", err)
 	}
@@ -216,8 +217,8 @@ func TestTransportModbusRTUHandlesRequestFrameEndToEnd(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	serverTr := gtransport.New(serverConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
-	clientTr := gtransport.New(clientConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	serverTr := gtransport.Wrap(serverConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	clientTr := gtransport.Wrap(clientConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
 	defer serverTr.Close()
 	defer clientTr.Close()
 
@@ -226,7 +227,7 @@ func TestTransportModbusRTUHandlesRequestFrameEndToEnd(t *testing.T) {
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		frame, err := serverTr.ReadFrame()
+		frame, err := serverTr.ReadFrame(context.Background())
 		if err != nil {
 			serverErrCh <- err
 			return
@@ -236,18 +237,18 @@ func TestTransportModbusRTUHandlesRequestFrameEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(resp)
+		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
 	}()
 
 	reqPayload := []byte{0x11, 0x03, 0x00, 0x00, 0x00, 0x01}
-	if err := clientTr.WriteFrame(reqPayload); err != nil {
+	if err := clientTr.WriteFrame(context.Background(), reqPayload); err != nil {
 		t.Fatalf("client write request payload: %v", err)
 	}
 
 	resultCh := make(chan []byte, 1)
 	clientErrCh := make(chan error, 1)
 	go func() {
-		got, err := clientTr.ReadFrame()
+		got, err := clientTr.ReadFrame(context.Background())
 		if err != nil {
 			clientErrCh <- err
 			return
@@ -277,8 +278,8 @@ func TestTransportModbusTCPHandlesExceptionResponseEndToEnd(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	serverTr := gtransport.New(serverConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
-	clientTr := gtransport.New(clientConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	serverTr := gtransport.Wrap(serverConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
+	clientTr := gtransport.Wrap(clientConn, modbus.NewTCP(), gtransport.WithReadTimeout(time.Second))
 	defer serverTr.Close()
 	defer clientTr.Close()
 
@@ -286,7 +287,7 @@ func TestTransportModbusTCPHandlesExceptionResponseEndToEnd(t *testing.T) {
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		frame, err := serverTr.ReadFrame()
+		frame, err := serverTr.ReadFrame(context.Background())
 		if err != nil {
 			serverErrCh <- err
 			return
@@ -296,15 +297,15 @@ func TestTransportModbusTCPHandlesExceptionResponseEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(resp)
+		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
 	}()
 
 	reqFrame := []byte{0x10, 0x20, 0x00, 0x00, 0x00, 0x06, 0x55, 0x03, 0x00, 0x00, 0x00, 0x02}
-	if err := clientTr.WriteFrame(reqFrame); err != nil {
+	if err := clientTr.WriteFrame(context.Background(), reqFrame); err != nil {
 		t.Fatalf("client write request frame: %v", err)
 	}
 
-	got, err := clientTr.ReadFrame()
+	got, err := clientTr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("client read exception frame: %v", err)
 	}
@@ -322,8 +323,8 @@ func TestTransportModbusRTUHandlesExceptionResponseEndToEnd(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 
-	serverTr := gtransport.New(serverConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
-	clientTr := gtransport.New(clientConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	serverTr := gtransport.Wrap(serverConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
+	clientTr := gtransport.Wrap(clientConn, modbus.NewRTU(), gtransport.WithReadTimeout(time.Second))
 	defer serverTr.Close()
 	defer clientTr.Close()
 
@@ -331,7 +332,7 @@ func TestTransportModbusRTUHandlesExceptionResponseEndToEnd(t *testing.T) {
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		frame, err := serverTr.ReadFrame()
+		frame, err := serverTr.ReadFrame(context.Background())
 		if err != nil {
 			serverErrCh <- err
 			return
@@ -341,15 +342,15 @@ func TestTransportModbusRTUHandlesExceptionResponseEndToEnd(t *testing.T) {
 			serverErrCh <- err
 			return
 		}
-		serverErrCh <- serverTr.WriteFrame(resp)
+		serverErrCh <- serverTr.WriteFrame(context.Background(), resp)
 	}()
 
 	reqPayload := []byte{0x66, 0x06, 0x00, 0x01, 0x12, 0x34}
-	if err := clientTr.WriteFrame(reqPayload); err != nil {
+	if err := clientTr.WriteFrame(context.Background(), reqPayload); err != nil {
 		t.Fatalf("client write request payload: %v", err)
 	}
 
-	got, err := clientTr.ReadFrame()
+	got, err := clientTr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("client read exception payload: %v", err)
 	}

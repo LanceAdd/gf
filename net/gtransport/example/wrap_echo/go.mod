@@ -1,4 +1,4 @@
-module github.com/gogf/gf/v2/net/gtransport/example/modbus_advanced
+module github.com/gogf/gf/v2/net/gtransport/example/wrap_echo
 
 go 1.23.0
 

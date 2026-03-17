@@ -4,14 +4,16 @@ import "testing"
 
 func TestPublicAPIShape(t *testing.T) {
 	var (
-		_ func([]byte) (Request, error)  = ParseTCPRequest
-		_ func([]byte) (Request, error)  = ParseRTURequest
-		_ func(Response) ([]byte, error) = EncodeTCPResponse
-		_ func(Response) ([]byte, error) = EncodeRTUResponse
+		_ func([]byte) (Request, error)              = ParseTCPRequest
+		_ func([]byte) (Request, error)              = ParseRTURequest
+		_ func([]byte) (Request, error)              = ParseRTURequestPayload
+		_ func(Response) ([]byte, error)             = EncodeTCPResponse
+		_ func(Response) ([]byte, error)             = EncodeRTUResponse
+		_ func(Response) ([]byte, error)             = EncodeRTUResponsePayload
 		_ func([]byte, ProcessImage) ([]byte, error) = HandleTCPRequestFrame
 		_ func([]byte, ProcessImage) ([]byte, error) = HandleRTURequestFrame
 		_ func([]byte, ProcessImage) ([]byte, error) = HandleRTURequestPayload
-		_ ProcessImage                   = NewMemoryProcessImage(1, 1, 1, 1)
+		_ ProcessImage                               = NewMemoryProcessImage(1, 1, 1, 1)
 	)
 	_ = ADUMeta{}.SlaveID
 }

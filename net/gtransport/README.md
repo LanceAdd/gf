@@ -1,14 +1,15 @@
 # gtransport
 
-`gtransport` provides framed read/write over stream connections using a fixed codec per transport.
+`gtransport` provides framed I/O over stream connections through one public
+`Transport` model.
 
-It is intentionally small:
+The package is centered on three ideas:
 
-- `Codec` converts between raw stream bytes and complete frames.
-- `Transport` performs synchronous `ReadFrame` / `WriteFrame` operations on an `io.ReadWriteCloser`.
-- Business logic stays outside the package.
+- a `Codec` defines frame boundaries and encoding rules
+- a `Transport` performs synchronous frame reads and writes
+- transport lifecycle can come from either `Dial` or `Wrap`
 
-## Public API
+## Primary API
 
 ```go
 type Codec interface {
@@ -18,131 +19,130 @@ type Codec interface {
 
 type Transport struct{}
 
-func New(conn io.ReadWriteCloser, codec Codec, opts ...Option) *Transport
-func (t *Transport) ReadFrame() ([]byte, error)
-func (t *Transport) WriteFrame(frame []byte) error
+func Dial(connector Connector, codec Codec, opts ...DialOption) *Transport
+func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *Transport
+
+func (t *Transport) ReadFrame(ctx context.Context) ([]byte, error)
+func (t *Transport) WriteFrame(ctx context.Context, frame []byte) error
 func (t *Transport) Close() error
+
+func (t *Transport) State() State
+func (t *Transport) LastReadAt() time.Time
+func (t *Transport) LastWriteAt() time.Time
+func (t *Transport) IdleFor(now time.Time) time.Duration
 ```
+
+## Dial vs Wrap
+
+Use `Dial` when the transport should own connection establishment and recover
+future availability after disconnects.
+
+Use `Wrap` when you already have a live connection, for example:
+
+- server-side `Accept()` flows
+- `net.Pipe` tests
+- wrapping `gtcp.Conn` or another already-open stream
+
+`Dial` may reconnect on a later operation after a connection failure.
+
+`Wrap` does not reconnect. Once the wrapped connection fails, that transport is
+terminal.
+
+## Read/Write Semantics
+
+- `ReadFrame(ctx)` and `WriteFrame(ctx, frame)` are the only primary framed I/O methods.
+- `ctx` is intended to cover the whole operation, including connect waiting and I/O blocking when the underlying connection supports deadlines.
+- failed operations return the observed error directly
+- failed operations are never transparently replayed
+
+That no-replay rule is intentional:
+
+- a failed write may already have reached the peer
+- a failed read may leave the old connection at an unknown frame boundary
+
+## Observability
+
+`Transport` exposes transport facts, not transport policy:
+
+- `State()` reports `idle`, `connecting`, `ready`, or `closed`
+- `State` implements `fmt.Stringer`, so `%s`/`%v` output uses those same names
+- `LastReadAt()` reports the last successful full-frame read
+- `LastWriteAt()` reports the last successful full-frame write
+- `IdleFor(now)` reports how long the active connection has gone without a successful read
+
+If a connection is ready but has not yet produced a frame, idle time is measured
+from the ready time of that connection.
 
 ## Options
 
+Shared transport options:
+
 - `WithReadTimeout(d time.Duration)`
 - `WithMaxBufferBytes(n int)`
+
+Dial-only options:
+
+- `WithConnectTimeout(d time.Duration)`
+- `WithReconnectBackoff(func(attempt int) time.Duration)`
 
 ## Common Codecs
 
 - `NewDelimiter(delim []byte, maxPayloadBytes int, strip bool)`
 - `NewLine(maxPayloadBytes int, strip bool)`
-  Decodes both `LF` and `CRLF` terminated frames, and encodes using `LF`.
 - `NewFixedLength(length int)`
 - `NewLengthPrefixed(fieldBytes int, order binary.ByteOrder, maxPayloadBytes int)`
-
-## Advanced Codec
-
 - `NewLengthField(opt LengthFieldOption)`
-
-Use this only when the simple length-prefixed constructor is not enough, for
-example when the length field is embedded inside a custom frame header.
 
 ## Protocol Codecs
 
-Protocol-aware codecs should live in subpackages instead of the `gtransport`
- root package.
+Protocol-aware codecs belong in subpackages.
 
+- `gtransport/adcp`
+  - `adcp.New(maxFrameLength ...int)`
 - `gtransport/modbus`
   - `modbus.NewTCP()`
   - `modbus.NewRTU()`
 
-`modbus.NewTCP()` works on full Modbus TCP ADUs and rewrites the MBAP `Length`
-field during encoding.
+## Recommended Flows
 
-`modbus.NewRTU()` validates CRC during decoding, returns RTU payload without
-CRC, and appends CRC during encoding.
-
-Both Modbus codecs also validate supported function-code payload legality for
-the built-in function set, including quantity ranges, byte-count consistency,
-single-coil values, and exception frame shape.
-
-The built-in Modbus codecs intentionally stop at protocol-static validation.
-They do not enforce deployment or application policy such as Unit ID
-whitelists, device ownership, ProcessImage bounds, or register-map semantics.
-
-## Modbus APIs
-
-The `gtransport/modbus` package exposes two usage paths.
-
-### Recommended APIs
-
-Use these when you want standard Modbus behavior with minimal glue code:
-
-- `modbus.HandleTCPRequestFrame(frame, image)`
-- `modbus.HandleRTURequestFrame(frame, image)`
-- `modbus.HandleRTURequestPayload(payload, image)`
-- `modbus.ExecuteRequest(req, image)`
-
-### Advanced APIs
-
-Use these when you want protocol building blocks and your own control flow:
-
-- `modbus.ParseTCPRequest(frame)`
-- `modbus.ParseRTURequest(frame)`
-- `modbus.EncodeTCPResponse(resp)`
-- `modbus.EncodeRTUResponse(resp)`
-- typed Modbus request and response models
-- `modbus.ProcessImage`
-
-### Semantic Rules
-
-- `TCP frame` means a full Modbus TCP ADU.
-- `RTU frame` means a raw Modbus RTU ADU with CRC.
-- `RTU payload` means the decoded CRC-stripped content returned by `gtransport.New(..., modbus.NewRTU())`.
-
-Use `HandleRTURequestFrame` for raw RTU ADUs and `HandleRTURequestPayload` for
-transport-decoded RTU payloads.
-
-### Common Flows
-
-Recommended TCP flow:
+Accepted connection flow:
 
 ```go
-frame, err := tr.ReadFrame()
+tr := gtransport.Wrap(conn, codec, gtransport.WithReadTimeout(5*time.Second))
+defer tr.Close()
+
+frame, err := tr.ReadFrame(context.Background())
 if err != nil {
     return err
 }
 
-respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
-if err != nil {
-    return err
-}
-
-return tr.WriteFrame(respFrame)
+return tr.WriteFrame(context.Background(), frame)
 ```
 
-Recommended raw RTU flow:
+Reconnectable outbound flow:
 
 ```go
-respFrame, err := modbus.HandleRTURequestFrame(frame, image)
+tr := gtransport.Dial(connector, codec, gtransport.WithConnectTimeout(3*time.Second))
+defer tr.Close()
+
+if err := tr.WriteFrame(context.Background(), payload); err != nil {
+    return err
+}
 ```
 
-Recommended RTU transport flow with `modbus.NewRTU()`:
+## Modbus Example
+
+Composable/default flow:
 
 ```go
-payload, err := tr.ReadFrame()
+tr := gtransport.Wrap(conn, modbus.NewTCP(), gtransport.WithReadTimeout(5*time.Second))
+defer tr.Close()
+
+frame, err := tr.ReadFrame(context.Background())
 if err != nil {
     return err
 }
 
-respPayload, err := modbus.HandleRTURequestPayload(payload, image)
-if err != nil {
-    return err
-}
-
-return tr.WriteFrame(respPayload)
-```
-
-Advanced manual flow:
-
-```go
 req, err := modbus.ParseTCPRequest(frame)
 if err != nil {
     return err
@@ -153,41 +153,65 @@ if err != nil {
     return err
 }
 
-out, err := modbus.EncodeTCPResponse(resp)
+respFrame, err := modbus.EncodeTCPResponse(resp)
 if err != nil {
     return err
 }
+
+return tr.WriteFrame(context.Background(), respFrame)
 ```
 
-### Modbus Examples
-
-- `example/modbus_recommended` shows the default high-level path built around
-  `HandleTCPRequestFrame`.
-- `example/modbus_advanced` shows the lower-level composable path built around
-  `ParseTCPRequest`, `ExecuteRequest`, and `EncodeTCPResponse`.
-
-## Example
+Convenience helper flow still exists when you want less boilerplate:
 
 ```go
-codec := gtransport.NewLengthPrefixed(2, binary.BigEndian, 1024)
-tr := gtransport.New(conn, codec)
-defer tr.Close()
-
-for {
-    frame, err := tr.ReadFrame()
-    if err != nil {
-        return err
-    }
-
-    if err := tr.WriteFrame(frame); err != nil {
-        return err
-    }
-}
+respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
 ```
 
-## Design Notes
+RTU semantics stay explicit:
 
-- One transport binds to one fixed codec.
-- Reads are synchronous and decode one full frame at a time.
-- Writes are synchronous and serialized internally.
-- There is no handler chain, channel API, or built-in business processing flow.
+- `ParseRTURequest` / `EncodeRTUResponse` operate on raw RTU ADUs with CRC
+- `ParseRTURequestPayload` / `EncodeRTUResponsePayload` operate on CRC-stripped RTU payloads returned by `modbus.NewRTU()`
+- `HandleRTURequestPayload` is the convenience wrapper around that payload path
+
+Example modules:
+
+- `example/wrap_echo` shows Wrap + LengthPrefixed codec echo
+- `example/dial_reconnect` shows Dial with automatic reconnection
+- `example/adcp_stream` shows decode-only ADCP payload reads with `adcp.New(adcp.DefaultMaxFrameLength * 2)`
+- `example/modbus_tcp` shows composable Modbus TCP server
+- `example/modbus_rtu` shows RTU codec over net.Pipe
+
+## ADCP Example
+
+Decode-only ADCP flow:
+
+```go
+tr := gtransport.Wrap(conn, adcp.New(16384), gtransport.WithReadTimeout(5*time.Second))
+defer tr.Close()
+
+payload, err := tr.ReadFrame(context.Background())
+if err != nil {
+    return err
+}
+
+return handleADCPPayload(payload)
+```
+
+ADCP codec semantics:
+
+- `adcp.New()` keeps the default max frame length of `8192`
+- `adcp.New(n)` uses `n` as the max frame length when `n > 0`
+- `adcp.DefaultMaxFrameLength` exposes that default limit for callers that want to scale from it
+- use `adcp.New(16384)` when the device can emit payloads larger than the default limit
+- `adcp.New()` scans the stream for a 16-byte `0x80` sync preamble
+- it validates the fixed metadata header and CRC16-CCITT checksum
+- `ReadFrame` returns only the ADCP payload bytes
+- `WriteFrame` is not supported with `adcp.New()` because the codec is decode-only in this version
+- `example/adcp_stream` shows a complete net.Pipe-based usage flow
+
+## Final API
+
+The final public creation API is:
+
+- `Dial`
+- `Wrap`

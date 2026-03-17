@@ -2,8 +2,10 @@ package gtransport
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -15,13 +17,42 @@ import (
 func TestPublicAPIShape(t *testing.T) {
 	var (
 		_ Codec = NewDelimiter([]byte("|"), 1024, true)
-		_ = New
+		_       = Dial
+		_       = Wrap
 	)
-	type ctor func(io.ReadWriteCloser, Codec, ...Option) *Transport
-	var _ ctor = New
-	_ = (&Transport{}).ReadFrame
-	_ = (&Transport{}).WriteFrame
+	type dialCtor func(Connector, Codec, ...DialOption) *Transport
+	type wrapCtor func(io.ReadWriteCloser, Codec, ...WrapOption) *Transport
+	type readFrameFunc func(context.Context) ([]byte, error)
+	type writeFrameFunc func(context.Context, []byte) error
+	var _ dialCtor = Dial
+	var _ wrapCtor = Wrap
+	var _ readFrameFunc = (&Transport{}).ReadFrame
+	var _ writeFrameFunc = (&Transport{}).WriteFrame
+	var _ fmt.Stringer = State(0)
 	_ = (&Transport{}).Close
+	_ = (&Transport{}).State
+	_ = (&Transport{}).LastReadAt
+	_ = (&Transport{}).LastWriteAt
+	_ = (&Transport{}).IdleFor
+}
+
+func TestStateString(t *testing.T) {
+	tests := []struct {
+		state State
+		want  string
+	}{
+		{state: StateIdle, want: "idle"},
+		{state: StateConnecting, want: "connecting"},
+		{state: StateReady, want: "ready"},
+		{state: StateClosed, want: "closed"},
+		{state: State(99), want: "state(99)"},
+	}
+
+	for _, tc := range tests {
+		if got := tc.state.String(); got != tc.want {
+			t.Fatalf("state %d: expected %q, got %q", tc.state, tc.want, got)
+		}
+	}
 }
 
 func TestTransportReadFrameDelimiter(t *testing.T) {
@@ -33,14 +64,14 @@ func TestTransportReadFrameDelimiter(t *testing.T) {
 		_, _ = server.Write([]byte("hello|world|"))
 	}()
 
-	tr := New(client, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
+	tr := Wrap(client, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
 	defer tr.Close()
 
-	frame1, err := tr.ReadFrame()
+	frame1, err := tr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("read first frame: %v", err)
 	}
-	frame2, err := tr.ReadFrame()
+	frame2, err := tr.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("read second frame: %v", err)
 	}
@@ -54,7 +85,7 @@ func TestTransportWriteFrameLengthPrefixed(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	tr := New(client, NewLengthPrefixed(2, binary.BigEndian, 1024), WithReadTimeout(0))
+	tr := Wrap(client, NewLengthPrefixed(2, binary.BigEndian, 1024), WithReadTimeout(0))
 	defer tr.Close()
 
 	done := make(chan []byte, 1)
@@ -64,7 +95,7 @@ func TestTransportWriteFrameLengthPrefixed(t *testing.T) {
 		done <- buf
 	}()
 
-	if err := tr.WriteFrame([]byte("hello")); err != nil {
+	if err := tr.WriteFrame(context.Background(), []byte("hello")); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}
 	got := <-done
@@ -76,19 +107,18 @@ func TestTransportWriteFrameLengthPrefixed(t *testing.T) {
 
 func TestTransportWriteFrameHandlesShortWrite(t *testing.T) {
 	var written bytes.Buffer
-	conn := &testConn{
-		writeFunc: func(p []byte) (int, error) {
-			n := 2
-			if len(p) < n {
-				n = len(p)
-			}
-			written.Write(p[:n])
-			return n, nil
-		},
+	conn := newTestConn()
+	conn.writeFunc = func(p []byte) (int, error) {
+		n := 2
+		if len(p) < n {
+			n = len(p)
+		}
+		written.Write(p[:n])
+		return n, nil
 	}
-	tr := New(conn, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
+	tr := Wrap(conn, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
 
-	if err := tr.WriteFrame([]byte("hello")); err != nil {
+	if err := tr.WriteFrame(context.Background(), []byte("hello")); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}
 	if got := written.String(); got != "hello|" {
@@ -102,36 +132,35 @@ func TestTransportWriteFrameSerializesConcurrentWrites(t *testing.T) {
 		activeWrites  int
 		maxConcurrent int
 	)
-	conn := &testConn{
-		writeFunc: func(p []byte) (int, error) {
-			mu.Lock()
-			activeWrites++
-			if activeWrites > maxConcurrent {
-				maxConcurrent = activeWrites
-			}
-			mu.Unlock()
+	conn := newTestConn()
+	conn.writeFunc = func(p []byte) (int, error) {
+		mu.Lock()
+		activeWrites++
+		if activeWrites > maxConcurrent {
+			maxConcurrent = activeWrites
+		}
+		mu.Unlock()
 
-			time.Sleep(20 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 
-			mu.Lock()
-			activeWrites--
-			mu.Unlock()
-			return len(p), nil
-		},
+		mu.Lock()
+		activeWrites--
+		mu.Unlock()
+		return len(p), nil
 	}
-	tr := New(conn, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
+	tr := Wrap(conn, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		if err := tr.WriteFrame([]byte("a")); err != nil {
+		if err := tr.WriteFrame(context.Background(), []byte("a")); err != nil {
 			t.Errorf("write a: %v", err)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		if err := tr.WriteFrame([]byte("b")); err != nil {
+		if err := tr.WriteFrame(context.Background(), []byte("b")); err != nil {
 			t.Errorf("write b: %v", err)
 		}
 	}()
@@ -143,12 +172,12 @@ func TestTransportWriteFrameSerializesConcurrentWrites(t *testing.T) {
 }
 
 func TestTransportCloseUnblocksReadFrame(t *testing.T) {
-	conn := &testConn{}
-	tr := New(conn, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
+	conn := newTestConn()
+	tr := Wrap(conn, NewDelimiter([]byte("|"), 1024, true), WithReadTimeout(0))
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := tr.ReadFrame()
+		_, err := tr.ReadFrame(context.Background())
 		errCh <- err
 	}()
 
@@ -199,11 +228,12 @@ type testConn struct {
 	writeFunc func([]byte) (int, error)
 }
 
+func newTestConn() *testConn {
+	return &testConn{closed: make(chan struct{})}
+}
+
 func (c *testConn) Read(_ []byte) (int, error) {
 	c.readCount.Add(1)
-	if c.closed == nil {
-		c.closed = make(chan struct{})
-	}
 	<-c.closed
 	return 0, io.EOF
 }
@@ -216,9 +246,6 @@ func (c *testConn) Write(p []byte) (int, error) {
 }
 
 func (c *testConn) Close() error {
-	if c.closed == nil {
-		c.closed = make(chan struct{})
-	}
 	c.closeOnce.Do(func() {
 		close(c.closed)
 	})

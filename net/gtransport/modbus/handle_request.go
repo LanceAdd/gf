@@ -12,7 +12,7 @@ func HandleRTURequestFrame(frame []byte, image ProcessImage) ([]byte, error) {
 
 // HandleRTURequestPayload handles one decoded Modbus RTU request payload and returns the decoded response payload.
 func HandleRTURequestPayload(payload []byte, image ProcessImage) ([]byte, error) {
-	return handleRequestFrame(payload, image, parseRTUTransportPayload, encodeRTUTransportPayload)
+	return handleRequestFrame(payload, image, ParseRTURequestPayload, EncodeRTUResponsePayload)
 }
 
 // handleRequestFrame is the shared request pipeline for parse -> execute ->
@@ -34,9 +34,9 @@ func handleRequestFrame(
 	return encode(resp)
 }
 
-// parseRTUTransportPayload reconstructs a typed request from the CRC-stripped
+// ParseRTURequestPayload reconstructs a typed request from the CRC-stripped
 // payload returned by the RTU transport codec.
-func parseRTUTransportPayload(payload []byte) (Request, error) {
+func ParseRTURequestPayload(payload []byte) (Request, error) {
 	if err := validateModbusPayload(payload); err != nil {
 		return nil, err
 	}
@@ -49,8 +49,8 @@ func parseRTUTransportPayload(payload []byte) (Request, error) {
 	return parseRequest(meta, payload)
 }
 
-// encodeRTUTransportPayload encodes a typed response back into CRC-stripped RTU
+// EncodeRTUResponsePayload encodes a typed response back into CRC-stripped RTU
 // payload bytes for transport-level writing.
-func encodeRTUTransportPayload(resp Response) ([]byte, error) {
+func EncodeRTUResponsePayload(resp Response) ([]byte, error) {
 	return encodeResponsePayload(resp)
 }

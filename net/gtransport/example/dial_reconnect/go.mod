@@ -1,4 +1,4 @@
-module github.com/gogf/gf/v2/net/gtransport/example/tcp_echo
+module github.com/gogf/gf/v2/net/gtransport/example/dial_reconnect
 
 go 1.23.0
 

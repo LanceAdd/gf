@@ -77,6 +77,24 @@ func TestEncodeRTUResponseWriteMultipleRegisters(t *testing.T) {
 	}
 }
 
+func TestEncodeRTUResponsePayloadWriteSingleRegister(t *testing.T) {
+	resp := WriteSingleRegisterResponse{
+		meta:    ADUMeta{Transport: TransportRTU, SlaveID: 0x33},
+		Address: 0x0064,
+		Value:   0x1234,
+	}
+
+	got, err := EncodeRTUResponsePayload(resp)
+	if err != nil {
+		t.Fatalf("encode rtu response payload: %v", err)
+	}
+
+	want := []byte{0x33, 0x06, 0x00, 0x64, 0x12, 0x34}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("expected %x, got %x", want, got)
+	}
+}
+
 func TestEncodeTCPExceptionResponse(t *testing.T) {
 	resp := ExceptionResponse{
 		meta:          ADUMeta{Transport: TransportTCP, TransactionID: 0x0506, SlaveID: 0x55},

@@ -3,6 +3,9 @@ package modbus
 import "slices"
 
 // MemoryProcessImage stores Modbus data areas in contiguous in-memory slices.
+//
+// MemoryProcessImage is NOT safe for concurrent use. Callers that share a
+// single image across goroutines must provide their own synchronization.
 type MemoryProcessImage struct {
 	coils            []bool
 	discreteInputs   []bool
@@ -17,6 +20,10 @@ func NewMemoryProcessImage(
 	holdingRegisterCount int,
 	inputRegisterCount int,
 ) *MemoryProcessImage {
+	coilCount = max(coilCount, 0)
+	discreteInputCount = max(discreteInputCount, 0)
+	holdingRegisterCount = max(holdingRegisterCount, 0)
+	inputRegisterCount = max(inputRegisterCount, 0)
 	return &MemoryProcessImage{
 		coils:            make([]bool, coilCount),
 		discreteInputs:   make([]bool, discreteInputCount),

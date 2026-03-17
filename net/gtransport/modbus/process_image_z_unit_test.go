@@ -176,3 +176,17 @@ func TestMemoryProcessImageZeroLengthWrites(t *testing.T) {
 		t.Fatal("expected empty registers write error")
 	}
 }
+
+func TestMemoryProcessImageNegativeCountsClampToZero(t *testing.T) {
+	image := NewMemoryProcessImage(-1, -2, -3, -4)
+
+	if len(image.coils) != 0 || len(image.discreteInputs) != 0 || len(image.holdingRegisters) != 0 || len(image.inputRegisters) != 0 {
+		t.Fatalf("expected negative counts to clamp to zero, got %d/%d/%d/%d", len(image.coils), len(image.discreteInputs), len(image.holdingRegisters), len(image.inputRegisters))
+	}
+	if err := image.WriteSingleCoil(0, true); err == nil {
+		t.Fatal("expected out-of-range error for zero-length coils")
+	}
+	if err := image.WriteSingleRegister(0, 1); err == nil {
+		t.Fatal("expected out-of-range error for zero-length holding registers")
+	}
+}

@@ -1,14 +1,14 @@
 # gtransport
 
-`gtransport` 用于在流式连接上按固定 codec 进行分帧读写。
+`gtransport` 通过一个统一的 `Transport` 模型，为流式连接提供分帧读写能力。
 
-它的设计目标是尽量小而直接：
+这个包围绕三个核心概念展开：
 
-- `Codec` 负责原始字节流和完整帧之间的转换。
-- `Transport` 负责在 `io.ReadWriteCloser` 上同步执行 `ReadFrame` / `WriteFrame`。
-- 业务逻辑放在包外处理。
+- `Codec` 负责定义帧边界和编码规则
+- `Transport` 负责同步读写完整帧
+- transport 生命周期来自 `Dial` 或 `Wrap`
 
-## 对外 API
+## 主 API
 
 ```go
 type Codec interface {
@@ -18,122 +18,127 @@ type Codec interface {
 
 type Transport struct{}
 
-func New(conn io.ReadWriteCloser, codec Codec, opts ...Option) *Transport
-func (t *Transport) ReadFrame() ([]byte, error)
-func (t *Transport) WriteFrame(frame []byte) error
+func Dial(connector Connector, codec Codec, opts ...DialOption) *Transport
+func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *Transport
+
+func (t *Transport) ReadFrame(ctx context.Context) ([]byte, error)
+func (t *Transport) WriteFrame(ctx context.Context, frame []byte) error
 func (t *Transport) Close() error
+
+func (t *Transport) State() State
+func (t *Transport) LastReadAt() time.Time
+func (t *Transport) LastWriteAt() time.Time
+func (t *Transport) IdleFor(now time.Time) time.Duration
 ```
+
+## Dial 与 Wrap
+
+当 transport 需要自己建连，并在断开后恢复后续可用性时，使用 `Dial`。
+
+当你已经有一个可用连接时，使用 `Wrap`，典型场景包括：
+
+- 服务端 `Accept()` 后的连接
+- `net.Pipe` 测试连接
+- `gtcp.Conn` 或其他已建立流连接的包装
+
+`Dial` 可以在后续调用中尝试重连。
+
+`Wrap` 不会重连。被包装连接一旦失效，该 transport 就进入终止状态。
+
+## 读写语义
+
+- `ReadFrame(ctx)` 和 `WriteFrame(ctx, frame)` 是唯一的主读写入口
+- `ctx` 的目标语义是覆盖整次操作；当底层连接支持 deadline 时，它同时约束建连等待和 I/O 阻塞
+- 失败的操作直接返回观察到的错误
+- 不透明重放失败的操作
+
+之所以坚持“不重放”，是因为：
+
+- 写失败时，对端可能已经收到全部或部分数据
+- 读失败时，旧连接上的帧边界可能已经不再确定
+
+## 观测能力
+
+`Transport` 暴露的是事实，不是策略：
+
+- `State()` 返回 `idle`、`connecting`、`ready`、`closed`
+- `State` 实现了 `fmt.Stringer`，因此 `%s`/`%v` 输出会直接使用这些名字
+- `LastReadAt()` 返回最近一次成功读到完整帧的时间
+- `LastWriteAt()` 返回最近一次成功写出完整帧的时间
+- `IdleFor(now)` 返回当前活动连接已经多久没有成功读到数据
+
+如果连接已经 ready，但还从未成功读到任何帧，则 idle 基线取该连接的 ready 时间。
 
 ## 可选项
 
+共享 transport 可选项：
+
 - `WithReadTimeout(d time.Duration)`
 - `WithMaxBufferBytes(n int)`
+
+仅 `Dial` 适用的可选项：
+
+- `WithConnectTimeout(d time.Duration)`
+- `WithReconnectBackoff(func(attempt int) time.Duration)`
 
 ## 常用 Codec
 
 - `NewDelimiter(delim []byte, maxPayloadBytes int, strip bool)`
 - `NewLine(maxPayloadBytes int, strip bool)`
-  解码时同时支持 `LF` 和 `CRLF`，编码时固定输出 `LF`。
 - `NewFixedLength(length int)`
 - `NewLengthPrefixed(fieldBytes int, order binary.ByteOrder, maxPayloadBytes int)`
-
-## 高级 Codec
-
 - `NewLengthField(opt LengthFieldOption)`
-
-只有在简单的长度前缀构造器不够用时再使用它，例如长度字段位于自定义头部中间。
 
 ## 协议型 Codec
 
-带协议知识的 codec 应放在子包里，而不是继续堆到 `gtransport` 主包。
+带协议知识的 codec 应放在子包。
 
+- `gtransport/adcp`
+  - `adcp.New(maxFrameLength ...int)`
 - `gtransport/modbus`
   - `modbus.NewTCP()`
   - `modbus.NewRTU()`
 
-`modbus.NewTCP()` 面向完整的 Modbus TCP ADU，并在编码时自动重写 MBAP `Length` 字段。
+## 推荐流程
 
-`modbus.NewRTU()` 会在解码时校验 CRC，返回去掉 CRC 的 RTU 内容，并在编码时自动补 CRC。
-
-这些 Modbus codec 还会校验内置功能码集合的静态 payload 合法性，包括数量范围、字节数一致性、单线圈写值以及异常帧形状。
-
-这些内置 Modbus codec 故意只做到协议静态校验，不负责部署或业务策略，例如 SlaveID 白名单、设备归属、ProcessImage 边界或寄存器映射语义。
-
-## Modbus API 分层
-
-`gtransport/modbus` 同时提供推荐路径和高级路径。
-
-### 推荐 API
-
-当你想用最少样板代码得到标准 Modbus 行为时，优先使用：
-
-- `modbus.HandleTCPRequestFrame(frame, image)`
-- `modbus.HandleRTURequestFrame(frame, image)`
-- `modbus.HandleRTURequestPayload(payload, image)`
-- `modbus.ExecuteRequest(req, image)`
-
-### 高级 API
-
-当你想自己组合协议零件和控制流程时，使用：
-
-- `modbus.ParseTCPRequest(frame)`
-- `modbus.ParseRTURequest(frame)`
-- `modbus.EncodeTCPResponse(resp)`
-- `modbus.EncodeRTUResponse(resp)`
-- typed Modbus request/response 模型
-- `modbus.ProcessImage`
-
-### 语义规则
-
-- `TCP frame` 表示完整的 Modbus TCP ADU。
-- `RTU frame` 表示带 CRC 的原始 Modbus RTU ADU。
-- `RTU payload` 表示 `gtransport.New(..., modbus.NewRTU())` 返回的去 CRC 内容。
-
-原始 RTU ADU 应使用 `HandleRTURequestFrame`，transport 解码后的 RTU 内容应使用 `HandleRTURequestPayload`。
-
-### 常见流程
-
-推荐 TCP 流程：
+已建立连接流程：
 
 ```go
-frame, err := tr.ReadFrame()
+tr := gtransport.Wrap(conn, codec, gtransport.WithReadTimeout(5*time.Second))
+defer tr.Close()
+
+frame, err := tr.ReadFrame(context.Background())
 if err != nil {
     return err
 }
 
-respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
-if err != nil {
-    return err
-}
-
-return tr.WriteFrame(respFrame)
+return tr.WriteFrame(context.Background(), frame)
 ```
 
-推荐原始 RTU 流程：
+可重连的主动连接流程：
 
 ```go
-respFrame, err := modbus.HandleRTURequestFrame(frame, image)
+tr := gtransport.Dial(connector, codec, gtransport.WithConnectTimeout(3*time.Second))
+defer tr.Close()
+
+if err := tr.WriteFrame(context.Background(), payload); err != nil {
+    return err
+}
 ```
 
-配合 `modbus.NewRTU()` 的推荐 RTU transport 流程：
+## Modbus 示例
+
+默认推荐的可组合流程：
 
 ```go
-payload, err := tr.ReadFrame()
+tr := gtransport.Wrap(conn, modbus.NewTCP(), gtransport.WithReadTimeout(5*time.Second))
+defer tr.Close()
+
+frame, err := tr.ReadFrame(context.Background())
 if err != nil {
     return err
 }
 
-respPayload, err := modbus.HandleRTURequestPayload(payload, image)
-if err != nil {
-    return err
-}
-
-return tr.WriteFrame(respPayload)
-```
-
-高级手动流程：
-
-```go
 req, err := modbus.ParseTCPRequest(frame)
 if err != nil {
     return err
@@ -144,41 +149,65 @@ if err != nil {
     return err
 }
 
-out, err := modbus.EncodeTCPResponse(resp)
+respFrame, err := modbus.EncodeTCPResponse(resp)
 if err != nil {
     return err
 }
+
+return tr.WriteFrame(context.Background(), respFrame)
 ```
 
-### Modbus 示例
-
-- `example/modbus_recommended` 展示默认推荐的高层路径，围绕
-  `HandleTCPRequestFrame` 组织。
-- `example/modbus_advanced` 展示底层可组合路径，围绕
-  `ParseTCPRequest`、`ExecuteRequest` 和 `EncodeTCPResponse` 组织。
-
-## 示例
+如果你只想减少样板代码，也仍然可以使用 helper 流程：
 
 ```go
-codec := gtransport.NewLengthPrefixed(2, binary.BigEndian, 1024)
-tr := gtransport.New(conn, codec)
-defer tr.Close()
-
-for {
-    frame, err := tr.ReadFrame()
-    if err != nil {
-        return err
-    }
-
-    if err := tr.WriteFrame(frame); err != nil {
-        return err
-    }
-}
+respFrame, err := modbus.HandleTCPRequestFrame(frame, image)
 ```
 
-## 设计说明
+RTU 语义需要严格区分：
 
-- 一个 transport 绑定一个固定 codec。
-- 读取是同步的，每次返回一帧完整数据。
-- 写入是同步的，内部自动串行化。
-- 不提供 handler 链、channel API，也不内置业务处理流程。
+- `ParseRTURequest` / `EncodeRTUResponse` 面向带 CRC 的原始 RTU ADU
+- `ParseRTURequestPayload` / `EncodeRTUResponsePayload` 面向 `modbus.NewRTU()` 返回的去 CRC RTU payload
+- `HandleRTURequestPayload` 是这条 payload 路径上的便捷封装
+
+示例模块：
+
+- `example/wrap_echo` 展示 Wrap + LengthPrefixed 编码的回显示例
+- `example/dial_reconnect` 展示 Dial 自动重连
+- `example/adcp_stream` 展示使用 `adcp.New(adcp.DefaultMaxFrameLength * 2)` 的只解码 ADCP 读取流程
+- `example/modbus_tcp` 展示可组合的 Modbus TCP 服务端
+- `example/modbus_rtu` 展示基于 net.Pipe 的 RTU 编码
+
+## ADCP 示例
+
+只解码的 ADCP 流程：
+
+```go
+tr := gtransport.Wrap(conn, adcp.New(16384), gtransport.WithReadTimeout(5*time.Second))
+defer tr.Close()
+
+payload, err := tr.ReadFrame(context.Background())
+if err != nil {
+    return err
+}
+
+return handleADCPPayload(payload)
+```
+
+ADCP codec 语义：
+
+- `adcp.New()` 使用默认最大帧长 `8192`
+- `adcp.New(n)` 会在 `n > 0` 时使用自定义最大帧长
+- `adcp.DefaultMaxFrameLength` 导出了这个默认值，便于外部按基线放大
+- 当设备 payload 可能超过默认上限时，可以直接使用 `adcp.New(16384)`
+- `adcp.New()` 会在字节流中扫描 16 字节连续的 `0x80` 同步头
+- 它会校验固定头字段和 CRC16-CCITT 校验值
+- `ReadFrame` 成功后只返回 ADCP payload 字节
+- 当前版本的 `adcp.New()` 是 decode-only codec，不支持 `WriteFrame`
+- `example/adcp_stream` 展示了一个完整的 net.Pipe 用法
+
+## 最终 API
+
+最终公开创建入口只保留：
+
+- `Dial`
+- `Wrap`

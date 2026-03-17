@@ -215,8 +215,9 @@ func ParseRTURequest(frame []byte) (Request, error) {
 // normalizeRTURequestPayload verifies the trailing CRC and returns the payload
 // bytes that are shared with the higher-level request parser.
 func normalizeRTURequestPayload(frame []byte) ([]byte, error) {
+	// Minimum RTU ADU: SlaveID + FunctionCode + ExceptionCode + 2 CRC = 5 bytes.
 	switch {
-	case len(frame) < 8:
+	case len(frame) < 5:
 		return nil, fmt.Errorf("modbus rtu frame missing crc")
 	case hasValidRTUCRC(frame):
 		// Parsing works on the protocol payload, so strip the CRC once it has
@@ -340,6 +341,9 @@ func parseWriteMultipleCoilsRequest(meta ADUMeta, payload []byte) (Request, erro
 	startAddress := binary.BigEndian.Uint16(payload[2:4])
 	quantity := int(binary.BigEndian.Uint16(payload[4:6]))
 	byteCount := int(payload[6])
+	if len(payload) < 7+byteCount {
+		return nil, fmt.Errorf("invalid modbus request payload length %d, need %d", len(payload), 7+byteCount)
+	}
 	values := make([]bool, quantity)
 	data := payload[7 : 7+byteCount]
 	for i := 0; i < quantity; i++ {
@@ -361,6 +365,9 @@ func parseWriteMultipleRegistersRequest(meta ADUMeta, payload []byte) (Request, 
 	}
 	startAddress := binary.BigEndian.Uint16(payload[2:4])
 	quantity := int(binary.BigEndian.Uint16(payload[4:6]))
+	if len(payload) < 7+quantity*2 {
+		return nil, fmt.Errorf("invalid modbus request payload length %d, need %d", len(payload), 7+quantity*2)
+	}
 	values := make([]uint16, quantity)
 	data := payload[7:]
 	for i := 0; i < quantity; i++ {

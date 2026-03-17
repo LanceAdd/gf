@@ -1,4 +1,4 @@
-module github.com/gogf/gf/v2/net/gtransport/example/modbus_recommended
+module github.com/gogf/gf/v2/net/gtransport/example/modbus_rtu
 
 go 1.23.0
 

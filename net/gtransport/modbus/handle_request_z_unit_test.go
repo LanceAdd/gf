@@ -101,6 +101,39 @@ func TestHandleRTURequestPayloadWriteMultipleCoils(t *testing.T) {
 	}
 }
 
+func TestHandleRTURequestPayloadMatchesComposableFlow(t *testing.T) {
+	imageForHelper := NewMemoryProcessImage(6, 4, 4, 4)
+	imageForComposable := NewMemoryProcessImage(6, 4, 4, 4)
+	payload := []byte{0x44, 0x0F, 0x00, 0x01, 0x00, 0x03, 0x01, 0x05}
+
+	got, err := HandleRTURequestPayload(payload, imageForHelper)
+	if err != nil {
+		t.Fatalf("handle rtu request payload: %v", err)
+	}
+
+	req, err := ParseRTURequestPayload(payload)
+	if err != nil {
+		t.Fatalf("parse rtu request payload: %v", err)
+	}
+	resp, err := ExecuteRequest(req, imageForComposable)
+	if err != nil {
+		t.Fatalf("execute request: %v", err)
+	}
+	composed, err := EncodeRTUResponsePayload(resp)
+	if err != nil {
+		t.Fatalf("encode rtu response payload: %v", err)
+	}
+
+	if !bytes.Equal(got, composed) {
+		t.Fatalf("expected helper and composable flow to match, got %x vs %x", got, composed)
+	}
+	for i := range imageForHelper.coils {
+		if imageForHelper.coils[i] != imageForComposable.coils[i] {
+			t.Fatalf("expected helper and composable images to match at %d", i)
+		}
+	}
+}
+
 func TestHandleTCPRequestFrameExceptionAddressOutOfRange(t *testing.T) {
 	image := NewMemoryProcessImage(2, 2, 1, 2)
 	reqFrame := []byte{0x10, 0x20, 0x00, 0x00, 0x00, 0x06, 0x55, 0x03, 0x00, 0x00, 0x00, 0x02}

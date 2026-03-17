@@ -97,6 +97,26 @@ func TestParseRTURequestReadInputRegisters(t *testing.T) {
 	}
 }
 
+func TestParseRTURequestPayloadReadDiscreteInputs(t *testing.T) {
+	payload := []byte{0x33, 0x02, 0x00, 0x20, 0x00, 0x08}
+
+	req, err := ParseRTURequestPayload(payload)
+	if err != nil {
+		t.Fatalf("parse rtu request payload: %v", err)
+	}
+
+	readReq, ok := req.(ReadDiscreteInputsRequest)
+	if !ok {
+		t.Fatalf("expected ReadDiscreteInputsRequest, got %T", req)
+	}
+	if readReq.Meta() != (ADUMeta{Transport: TransportRTU, SlaveID: 0x33}) {
+		t.Fatalf("unexpected meta: %+v", readReq.Meta())
+	}
+	if readReq.StartAddress != 0x0020 || readReq.Quantity != 0x0008 {
+		t.Fatalf("unexpected read discrete inputs request: %+v", readReq)
+	}
+}
+
 func TestParseRTURequestRejectsMissingCRC(t *testing.T) {
 	_, err := ParseRTURequest([]byte{0x44, 0x04, 0x01, 0x00, 0x00, 0x03})
 	if err == nil {
