@@ -30,7 +30,7 @@ func (c rtuCodec) Decode(in []byte) ([]byte, int, error) {
 			return frame, offset + frameLength, nil
 		}
 		if errors.Is(err, gtransport.ErrNeedMoreData) {
-			return nil, 0, err
+			return nil, offset, err
 		}
 		// Keep scanning forward so RTU streams can resynchronize after noise or
 		// a malformed prefix.
