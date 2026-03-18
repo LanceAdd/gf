@@ -87,6 +87,30 @@ func (m *MemoryProcessImage) WriteSingleRegister(address uint16, value uint16) e
 	return nil
 }
 
+// WriteInputRegister writes one input register value at address.
+func (m *MemoryProcessImage) WriteInputRegister(address uint16, value uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := int(address)
+	if index >= len(m.inputRegisters) {
+		return ErrProcessImageAddressOutOfRange
+	}
+	m.inputRegisters[index] = value
+	return nil
+}
+
+// WriteDiscreteInput writes one discrete input value at address.
+func (m *MemoryProcessImage) WriteDiscreteInput(address uint16, value bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := int(address)
+	if index >= len(m.discreteInputs) {
+		return ErrProcessImageAddressOutOfRange
+	}
+	m.discreteInputs[index] = value
+	return nil
+}
+
 // WriteMultipleCoils implements ProcessImage.WriteMultipleCoils.
 func (m *MemoryProcessImage) WriteMultipleCoils(start uint16, values []bool) error {
 	m.mu.Lock()
