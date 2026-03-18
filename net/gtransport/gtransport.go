@@ -4,13 +4,12 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-// Package gtransport provides framed I/O over stream connections through one
-// Transport model bound to one Codec.
+// Package gtransport provides framed I/O over stream connections.
 //
 // Core package responsibilities:
 //   - Codec defines frame discovery and encoding rules
-//   - Transport provides synchronous ReadFrame/WriteFrame operations
-//   - Dial and Wrap define whether the transport owns connection lifecycle
+//   - WrapTransport provides synchronous ReadFrame/WriteFrame on a fixed connection
+//   - DialTransport adds automatic reconnection, backoff, idle detection, and event callbacks
 //
 // Built-in generic codecs include delimiter, line, fixed-length, and
 // length-field variants.
@@ -67,15 +66,24 @@ type Codec interface {
 	Encode(frame []byte) ([]byte, error)
 }
 
-type transportOption func(*Transport)
+// FrameTransport is the common interface for framed transports.
+// *WrapTransport and *DialTransport both satisfy it.
+type FrameTransport interface {
+	ReadFrame(ctx context.Context) ([]byte, error)
+	WriteFrame(ctx context.Context, frame []byte) error
+	Close() error
+	State() State
+}
 
-// WrapOption configures a wrapped fixed-connection Transport.
-type WrapOption = transportOption
+// Observable provides read/write activity timestamps and idle duration.
+// *WrapTransport and *DialTransport both satisfy it.
+type Observable interface {
+	IdleFor(now time.Time) time.Duration
+	LastReadAt() time.Time
+	LastWriteAt() time.Time
+}
 
-// DialOption configures a dial-managed Transport.
-type DialOption = transportOption
-
-// State represents the lifecycle state of a Transport.
+// State represents the lifecycle state of a transport.
 type State int
 
 const (
@@ -105,213 +113,38 @@ func (s State) String() string {
 	}
 }
 
-type transportMode int
+// ---------------------------------------------------------------------------
+// frameIO — shared framed I/O logic embedded by WrapTransport and DialTransport
+// ---------------------------------------------------------------------------
 
-const (
-	transportModeWrap transportMode = iota
-	transportModeDial
-)
-
-// Transport performs synchronous framed reads and writes using either a wrapped
-// live connection or a dial-managed connection lifecycle.
-type Transport struct {
-	mode      transportMode
-	connector Connector
-	codec     Codec
-
-	mu              sync.Mutex
-	writeMu         sync.Mutex
-	closeOnce       sync.Once
-	closedCh        chan struct{}
-	state           State
-	conn            io.ReadWriteCloser
-	connectingCh    chan struct{}
-	connectFailures int
-
+type frameIO struct {
+	codec          Codec
 	readBuffer     []byte
 	maxBufferBytes int
 	readTimeout    time.Duration
-
-	connectTimeout   time.Duration
-	reconnectBackoff func(attempt int) time.Duration
-
-	lastReadAt  time.Time
-	lastWriteAt time.Time
-	readyAt     time.Time
-
-	minStableDuration time.Duration
 }
 
-// WithReadTimeout sets the timeout applied to each underlying read while
-// waiting for a complete frame. Set it to 0 to disable read deadlines.
-func WithReadTimeout(d time.Duration) WrapOption {
-	return func(t *Transport) {
-		t.readTimeout = d
+func newFrameIO(codec Codec) frameIO {
+	return frameIO{
+		codec:          codec,
+		readBuffer:     make([]byte, 0, defaultReadBufferSize),
+		maxBufferBytes: defaultMaxBufferBytes,
+		readTimeout:    defaultReadTimeout,
 	}
 }
 
-// WithMaxBufferBytes limits the internal read buffer size. It protects against
-// unbounded growth when the peer sends incomplete or invalid frames.
-func WithMaxBufferBytes(n int) WrapOption {
-	return func(t *Transport) {
-		if n > 0 {
-			t.maxBufferBytes = n
-		}
-	}
-}
-
-// Wrap creates a Transport bound to an already-open connection.
-func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *Transport {
-	t := newTransport(codec)
-	t.mode = transportModeWrap
-	t.conn = conn
-	if conn == nil {
-		t.state = StateClosed
-	} else {
-		t.state = StateReady
-		t.readyAt = time.Now()
-	}
-	for _, opt := range opts {
-		opt(t)
-	}
-	return t
-}
-
-func newTransport(codec Codec) *Transport {
-	return &Transport{
-		codec:             codec,
-		closedCh:          make(chan struct{}),
-		readBuffer:        make([]byte, 0, defaultReadBufferSize),
-		maxBufferBytes:    defaultMaxBufferBytes,
-		readTimeout:       defaultReadTimeout,
-		state:             StateIdle,
-		minStableDuration: 10 * time.Second,
-	}
-}
-
-// ReadFrame blocks until one complete frame is decoded or an error occurs.
-func (t *Transport) ReadFrame(ctx context.Context) ([]byte, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if t.codec == nil {
-		return nil, ErrTransportMissingCodec
-	}
-	conn, err := t.ensureConn(ctx)
-	if err != nil {
-		return nil, err
-	}
-	frame, err := t.readFrameFromConn(ctx, conn)
-	if err != nil {
-		if shouldInvalidateConn(err) {
-			t.handleConnectionFailure(conn)
-		}
-		return nil, err
-	}
-	t.markRead(time.Now())
-	return frame, nil
-}
-
-// WriteFrame encodes and writes one complete frame. Concurrent writes are
-// serialized internally.
-func (t *Transport) WriteFrame(ctx context.Context, frame []byte) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if t.codec == nil {
-		return ErrTransportMissingCodec
-	}
-	conn, err := t.ensureConn(ctx)
-	if err != nil {
-		return err
-	}
-	encoded, err := t.codec.Encode(frame)
-	if err != nil {
-		return err
-	}
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	if err = t.writeFull(ctx, conn, encoded); err != nil {
-		if shouldInvalidateConn(err) {
-			t.handleConnectionFailure(conn)
-		}
-		return err
-	}
-	t.markWrite(time.Now())
-	return nil
-}
-
-// Close closes the underlying connection and prevents future reconnects.
-func (t *Transport) Close() error {
-	var (
-		conn     io.ReadWriteCloser
-		closeErr error
-	)
-
-	t.closeOnce.Do(func() {
-		t.mu.Lock()
-		conn = t.conn
-		t.conn = nil
-		t.readBuffer = t.readBuffer[:0]
-		t.readyAt = time.Time{}
-		t.transitionStateLocked(StateClosed)
-		close(t.closedCh)
-		t.mu.Unlock()
-	})
-	if conn != nil {
-		closeErr = conn.Close()
-	}
-	return closeErr
-}
-
-// State reports the current lifecycle state.
-func (t *Transport) State() State {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.state
-}
-
-// LastReadAt reports the last successful read time.
-func (t *Transport) LastReadAt() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastReadAt
-}
-
-// LastWriteAt reports the last successful write time.
-func (t *Transport) LastWriteAt() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.lastWriteAt
-}
-
-// IdleFor reports how long the active connection has been idle for reads.
-func (t *Transport) IdleFor(now time.Time) time.Duration {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.conn == nil {
-		return 0
-	}
-	baseline := t.idleBaselineLocked()
-	if baseline.IsZero() || now.Before(baseline) {
-		return 0
-	}
-	return now.Sub(baseline)
-}
-
-func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteCloser) ([]byte, error) {
+func (f *frameIO) readFrameFromConn(ctx context.Context, conn io.ReadWriteCloser) ([]byte, error) {
 	var pendingReadErr error
 	for {
-		frame, consumed, err := t.codec.Decode(t.readBuffer)
+		frame, consumed, err := f.codec.Decode(f.readBuffer)
 		switch {
-		case consumed < 0 || consumed > len(t.readBuffer):
-			return nil, fmt.Errorf("invalid codec output consumed bytes %d for input %d", consumed, len(t.readBuffer))
+		case consumed < 0 || consumed > len(f.readBuffer):
+			return nil, fmt.Errorf("invalid codec output consumed bytes %d for input %d", consumed, len(f.readBuffer))
 		case err == nil && consumed == 0:
 			return nil, errors.New("invalid codec output: consumed bytes cannot be 0 when decoding succeeds")
 		case consumed > 0:
-			t.readBuffer = t.readBuffer[consumed:]
-			t.shrinkReadBufferIfNeeded()
+			f.readBuffer = f.readBuffer[consumed:]
+			f.shrinkReadBufferIfNeeded()
 		}
 		if err == nil {
 			if frame == nil {
@@ -326,7 +159,7 @@ func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteClos
 			return nil, pendingReadErr
 		}
 
-		restore, setErr := t.prepareReadDeadline(ctx, conn)
+		restore, setErr := f.prepareReadDeadline(ctx, conn)
 		if setErr != nil {
 			return nil, setErr
 		}
@@ -334,9 +167,9 @@ func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteClos
 		n, readErr := conn.Read(buffer)
 		restore()
 		if n > 0 {
-			t.readBuffer = append(t.readBuffer, buffer[:n]...)
-			if len(t.readBuffer) > t.maxBufferBytes {
-				return nil, fmt.Errorf("read buffer exceeded max bytes %d", t.maxBufferBytes)
+			f.readBuffer = append(f.readBuffer, buffer[:n]...)
+			if len(f.readBuffer) > f.maxBufferBytes {
+				return nil, fmt.Errorf("read buffer exceeded max bytes %d", f.maxBufferBytes)
 			}
 		}
 		if readErr != nil {
@@ -352,10 +185,10 @@ func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteClos
 	}
 }
 
-func (t *Transport) writeFull(ctx context.Context, conn io.ReadWriteCloser, data []byte) error {
+func (f *frameIO) writeFull(ctx context.Context, conn io.ReadWriteCloser, data []byte) error {
 	offset := 0
 	for offset < len(data) {
-		restore, err := t.prepareWriteDeadline(ctx, conn)
+		restore, err := f.prepareWriteDeadline(ctx, conn)
 		if err != nil {
 			return err
 		}
@@ -377,21 +210,39 @@ func (t *Transport) writeFull(ctx context.Context, conn io.ReadWriteCloser, data
 	return nil
 }
 
-func (t *Transport) prepareReadDeadline(ctx context.Context, conn io.ReadWriteCloser) (func(), error) {
+func (f *frameIO) prepareReadDeadline(ctx context.Context, conn io.ReadWriteCloser) (func(), error) {
 	dl, ok := conn.(readDeadliner)
 	if !ok {
 		return func() {}, nil
 	}
-	return prepareDeadline(ctx, t.readTimeout, dl.SetReadDeadline)
+	return prepareDeadline(ctx, f.readTimeout, dl.SetReadDeadline)
 }
 
-func (t *Transport) prepareWriteDeadline(ctx context.Context, conn io.ReadWriteCloser) (func(), error) {
+func (f *frameIO) prepareWriteDeadline(ctx context.Context, conn io.ReadWriteCloser) (func(), error) {
 	dl, ok := conn.(writeDeadliner)
 	if !ok {
 		return func() {}, nil
 	}
 	return prepareDeadline(ctx, 0, dl.SetWriteDeadline)
 }
+
+// shrinkReadBufferIfNeeded compacts or resets the read buffer after bytes have
+// been consumed.
+func (f *frameIO) shrinkReadBufferIfNeeded() {
+	if len(f.readBuffer) == 0 {
+		if cap(f.readBuffer) > defaultReadBufferSize*8 {
+			f.readBuffer = make([]byte, 0, defaultReadBufferSize)
+		}
+		return
+	}
+	if cap(f.readBuffer) > defaultReadBufferSize*8 && len(f.readBuffer)*4 < cap(f.readBuffer) {
+		f.readBuffer = bytes.Clone(f.readBuffer)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 func prepareDeadline(ctx context.Context, fallback time.Duration, setDeadline func(time.Time) error) (func(), error) {
 	deadline, hasDeadline := ctx.Deadline()
@@ -442,72 +293,226 @@ func shouldInvalidateConn(err error) bool {
 	return true
 }
 
-func (t *Transport) handleConnectionFailure(failedConn io.ReadWriteCloser) {
+// ---------------------------------------------------------------------------
+// WrapTransport — fixed-connection framed transport
+// ---------------------------------------------------------------------------
+
+// Compile-time interface checks.
+var (
+	_ FrameTransport = (*WrapTransport)(nil)
+	_ Observable     = (*WrapTransport)(nil)
+)
+
+// WrapOption configures a WrapTransport.
+type WrapOption func(*WrapTransport)
+
+// WithReadTimeout sets the timeout applied to each underlying read while
+// waiting for a complete frame. Set it to 0 to disable read deadlines.
+func WithReadTimeout(d time.Duration) WrapOption {
+	return func(w *WrapTransport) {
+		w.readTimeout = d
+	}
+}
+
+// WithMaxBufferBytes limits the internal read buffer size. It protects against
+// unbounded growth when the peer sends incomplete or invalid frames.
+func WithMaxBufferBytes(n int) WrapOption {
+	return func(w *WrapTransport) {
+		if n > 0 {
+			w.maxBufferBytes = n
+		}
+	}
+}
+
+// WrapTransport performs synchronous framed reads and writes on a fixed,
+// externally-managed connection. Connection failures are permanent.
+type WrapTransport struct {
+	frameIO
+
+	mu        sync.Mutex
+	writeMu   sync.Mutex
+	closeOnce sync.Once
+	state     State
+	conn      io.ReadWriteCloser
+
+	lastReadAt  time.Time
+	lastWriteAt time.Time
+	readyAt     time.Time
+}
+
+// Wrap creates a WrapTransport bound to an already-open connection.
+func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *WrapTransport {
+	w := &WrapTransport{
+		frameIO: newFrameIO(codec),
+		state:   StateClosed,
+	}
+	if conn != nil {
+		w.conn = conn
+		w.state = StateReady
+		w.readyAt = time.Now()
+	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
+}
+
+// ReadFrame blocks until one complete frame is decoded or an error occurs.
+func (w *WrapTransport) ReadFrame(ctx context.Context) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if w.codec == nil {
+		return nil, ErrTransportMissingCodec
+	}
+	conn, err := w.getConn()
+	if err != nil {
+		return nil, err
+	}
+	frame, err := w.readFrameFromConn(ctx, conn)
+	if err != nil {
+		if shouldInvalidateConn(err) {
+			w.handleConnectionFailure(conn)
+		}
+		return nil, err
+	}
+	w.markRead(time.Now())
+	return frame, nil
+}
+
+// WriteFrame encodes and writes one complete frame. Concurrent writes are
+// serialized internally.
+func (w *WrapTransport) WriteFrame(ctx context.Context, frame []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if w.codec == nil {
+		return ErrTransportMissingCodec
+	}
+	conn, err := w.getConn()
+	if err != nil {
+		return err
+	}
+	encoded, err := w.codec.Encode(frame)
+	if err != nil {
+		return err
+	}
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if err = w.writeFull(ctx, conn, encoded); err != nil {
+		if shouldInvalidateConn(err) {
+			w.handleConnectionFailure(conn)
+		}
+		return err
+	}
+	w.markWrite(time.Now())
+	return nil
+}
+
+// Close closes the underlying connection and marks the transport as closed.
+func (w *WrapTransport) Close() error {
+	var (
+		conn     io.ReadWriteCloser
+		closeErr error
+	)
+	w.closeOnce.Do(func() {
+		w.mu.Lock()
+		conn = w.conn
+		w.conn = nil
+		w.readBuffer = w.readBuffer[:0]
+		w.readyAt = time.Time{}
+		w.state = StateClosed
+		w.mu.Unlock()
+	})
+	if conn != nil {
+		closeErr = conn.Close()
+	}
+	return closeErr
+}
+
+// State reports the current lifecycle state.
+func (w *WrapTransport) State() State {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.state
+}
+
+// LastReadAt reports the last successful read time.
+func (w *WrapTransport) LastReadAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastReadAt
+}
+
+// LastWriteAt reports the last successful write time.
+func (w *WrapTransport) LastWriteAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastWriteAt
+}
+
+// IdleFor reports how long the active connection has been idle for reads.
+func (w *WrapTransport) IdleFor(now time.Time) time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn == nil {
+		return 0
+	}
+	baseline := w.idleBaselineLocked()
+	if baseline.IsZero() || now.Before(baseline) {
+		return 0
+	}
+	return now.Sub(baseline)
+}
+
+func (w *WrapTransport) getConn() (io.ReadWriteCloser, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.state == StateClosed {
+		return nil, ErrTransportClosed
+	}
+	if w.conn == nil {
+		return nil, ErrTransportClosed
+	}
+	return w.conn, nil
+}
+
+func (w *WrapTransport) handleConnectionFailure(failedConn io.ReadWriteCloser) {
 	if failedConn == nil {
 		return
 	}
 
-	t.mu.Lock()
-	if t.conn == failedConn {
-		if !t.readyAt.IsZero() && time.Since(t.readyAt) >= t.minStableDuration {
-			t.connectFailures = 0
-		} else {
-			t.connectFailures++
-		}
-		t.conn = nil
-		t.readBuffer = t.readBuffer[:0]
-		t.readyAt = time.Time{}
-		t.lastReadAt = time.Time{}
-		t.lastWriteAt = time.Time{}
-		if t.mode == transportModeDial {
-			t.transitionStateLocked(StateIdle)
-		} else {
-			t.transitionStateLocked(StateClosed)
-		}
+	w.mu.Lock()
+	if w.conn == failedConn {
+		w.conn = nil
+		w.readBuffer = w.readBuffer[:0]
+		w.readyAt = time.Time{}
+		w.lastReadAt = time.Time{}
+		w.lastWriteAt = time.Time{}
+		w.state = StateClosed
 	}
-	t.mu.Unlock()
+	w.mu.Unlock()
 
 	_ = failedConn.Close()
 }
 
-func (t *Transport) markRead(now time.Time) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.lastReadAt = now
+func (w *WrapTransport) markRead(now time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastReadAt = now
 }
 
-func (t *Transport) markWrite(now time.Time) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.lastWriteAt = now
+func (w *WrapTransport) markWrite(now time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastWriteAt = now
 }
 
-func (t *Transport) transitionStateLocked(next State) {
-	if t.state == next {
-		return
+func (w *WrapTransport) idleBaselineLocked() time.Time {
+	if !w.lastReadAt.IsZero() && (w.readyAt.IsZero() || !w.lastReadAt.Before(w.readyAt)) {
+		return w.lastReadAt
 	}
-	t.state = next
-}
-
-func (t *Transport) idleBaselineLocked() time.Time {
-	if !t.lastReadAt.IsZero() && (t.readyAt.IsZero() || !t.lastReadAt.Before(t.readyAt)) {
-		return t.lastReadAt
-	}
-	return t.readyAt
-}
-
-// shrinkReadBufferIfNeeded compacts or resets the read buffer after bytes have
-// been consumed.
-func (t *Transport) shrinkReadBufferIfNeeded() {
-	if len(t.readBuffer) == 0 {
-		if cap(t.readBuffer) > defaultReadBufferSize*8 {
-			t.readBuffer = make([]byte, 0, defaultReadBufferSize)
-		}
-		return
-	}
-	if cap(t.readBuffer) > defaultReadBufferSize*8 && len(t.readBuffer)*4 < cap(t.readBuffer) {
-		t.readBuffer = bytes.Clone(t.readBuffer)
-	}
+	return w.readyAt
 }
