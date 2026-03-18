@@ -18,9 +18,7 @@ const (
 // encode.
 type tcpCodec struct{}
 
-// Decode scans the buffered byte stream for the next valid Modbus TCP ADU.
-// It may discard malformed candidates as noise so the transport can
-// resynchronize and continue reading later frames from the same connection.
+// Decode returns one complete Modbus TCP ADU from the input buffer.
 func (c tcpCodec) Decode(in []byte) ([]byte, int, error) {
 	if len(in) < tcpHeaderLength {
 		return nil, 0, gtransport.ErrNeedMoreData
@@ -39,9 +37,6 @@ func (c tcpCodec) Decode(in []byte) ([]byte, int, error) {
 		// The MBAP length field counts Unit/Slave ID plus PDU bytes, so the full
 		// ADU size is the 6-byte prefix before the field plus the declared length.
 		frameLength := 6 + length
-		if frameLength < tcpHeaderLength {
-			continue
-		}
 		if len(in[start:]) < frameLength {
 			if partialCandidateStart < 0 {
 				partialCandidateStart = start

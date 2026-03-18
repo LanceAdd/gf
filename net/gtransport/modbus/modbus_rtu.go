@@ -20,7 +20,6 @@ type rtuCodec struct{}
 // Decode scans the buffer for one complete RTU frame and returns the payload
 // without its trailing CRC bytes.
 func (c rtuCodec) Decode(in []byte) ([]byte, int, error) {
-	var lastErr error
 	for offset := 0; offset < len(in); offset++ {
 		if len(in[offset:]) < 2 {
 			break
@@ -34,12 +33,15 @@ func (c rtuCodec) Decode(in []byte) ([]byte, int, error) {
 		}
 		// Keep scanning forward so RTU streams can resynchronize after noise or
 		// a malformed prefix.
-		lastErr = err
 	}
-	if lastErr != nil {
-		return nil, 0, lastErr
+	// All candidates failed. Consume scanned bytes (keeping the last byte
+	// which could be the start of a new frame) and let the transport wait
+	// for more data instead of invalidating the connection.
+	consumed := len(in) - 1
+	if consumed < 0 {
+		consumed = 0
 	}
-	return nil, 0, gtransport.ErrNeedMoreData
+	return nil, consumed, gtransport.ErrNeedMoreData
 }
 
 // decodeCandidate validates a frame candidate starting at the current buffer
@@ -122,10 +124,7 @@ func (c rtuCodec) writeMultipleFrameLength(in []byte) (int, error) {
 		return fixedLen, nil
 	}
 	if len(in) < 7 {
-		if len(in) < fixedLen {
-			return 0, gtransport.ErrNeedMoreData
-		}
-		return fixedLen, nil
+		return 0, gtransport.ErrNeedMoreData
 	}
 	frameLen := 9 + int(in[6])
 	if frameLen > rtuMaxADULength {
@@ -136,9 +135,6 @@ func (c rtuCodec) writeMultipleFrameLength(in []byte) (int, error) {
 	}
 	if c.hasValidCRC(in, frameLen) {
 		return frameLen, nil
-	}
-	if len(in) < fixedLen {
-		return 0, gtransport.ErrNeedMoreData
 	}
 	return fixedLen, nil
 }
