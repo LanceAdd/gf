@@ -33,6 +33,15 @@ func WithReconnectBackoff(backoff func(attempt int) time.Duration) DialOption {
 	}
 }
 
+// WithMinStableDuration sets the minimum time a connection must remain open
+// to be considered stable. If a connection fails before this duration,
+// connectFailures is incremented instead of reset, preserving backoff.
+func WithMinStableDuration(d time.Duration) DialOption {
+	return func(t *Transport) {
+		t.minStableDuration = d
+	}
+}
+
 // Dial creates a transport with lazy connection ownership and reconnectable
 // future availability.
 func Dial(connector Connector, codec Codec, opts ...DialOption) *Transport {
@@ -160,8 +169,9 @@ func (t *Transport) finishConnectSuccess(conn io.ReadWriteCloser) error {
 	}
 	t.conn = conn
 	t.readBuffer = t.readBuffer[:0]
-	t.connectFailures = 0
 	t.readyAt = time.Now()
+	t.lastReadAt = time.Time{}
+	t.lastWriteAt = time.Time{}
 	t.transitionStateLocked(StateReady)
 	return nil
 }

@@ -138,6 +138,8 @@ type Transport struct {
 	lastReadAt  time.Time
 	lastWriteAt time.Time
 	readyAt     time.Time
+
+	minStableDuration time.Duration
 }
 
 // WithReadTimeout sets the timeout applied to each underlying read while
@@ -177,12 +179,13 @@ func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *Transport {
 
 func newTransport(codec Codec) *Transport {
 	return &Transport{
-		codec:          codec,
-		closedCh:       make(chan struct{}),
-		readBuffer:     make([]byte, 0, defaultReadBufferSize),
-		maxBufferBytes: defaultMaxBufferBytes,
-		readTimeout:    defaultReadTimeout,
-		state:          StateIdle,
+		codec:             codec,
+		closedCh:          make(chan struct{}),
+		readBuffer:        make([]byte, 0, defaultReadBufferSize),
+		maxBufferBytes:    defaultMaxBufferBytes,
+		readTimeout:       defaultReadTimeout,
+		state:             StateIdle,
+		minStableDuration: 10 * time.Second,
 	}
 }
 
@@ -298,6 +301,7 @@ func (t *Transport) IdleFor(now time.Time) time.Duration {
 }
 
 func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteCloser) ([]byte, error) {
+	var pendingReadErr error
 	for {
 		frame, consumed, err := t.codec.Decode(t.readBuffer)
 		switch {
@@ -318,6 +322,9 @@ func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteClos
 		if !errors.Is(err, ErrNeedMoreData) {
 			return nil, err
 		}
+		if pendingReadErr != nil {
+			return nil, pendingReadErr
+		}
 
 		restore, setErr := t.prepareReadDeadline(ctx, conn)
 		if setErr != nil {
@@ -335,6 +342,10 @@ func (t *Transport) readFrameFromConn(ctx context.Context, conn io.ReadWriteClos
 		if readErr != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
+			}
+			if n > 0 {
+				pendingReadErr = readErr
+				continue
 			}
 			return nil, readErr
 		}
@@ -438,9 +449,16 @@ func (t *Transport) handleConnectionFailure(failedConn io.ReadWriteCloser) {
 
 	t.mu.Lock()
 	if t.conn == failedConn {
+		if !t.readyAt.IsZero() && time.Since(t.readyAt) >= t.minStableDuration {
+			t.connectFailures = 0
+		} else {
+			t.connectFailures++
+		}
 		t.conn = nil
 		t.readBuffer = t.readBuffer[:0]
 		t.readyAt = time.Time{}
+		t.lastReadAt = time.Time{}
+		t.lastWriteAt = time.Time{}
 		if t.mode == transportModeDial {
 			t.transitionStateLocked(StateIdle)
 		} else {
