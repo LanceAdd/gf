@@ -20,20 +20,29 @@ func TestPublicAPIShape(t *testing.T) {
 		_       = Dial
 		_       = Wrap
 	)
-	type dialCtor func(Connector, Codec, ...DialOption) *Transport
-	type wrapCtor func(io.ReadWriteCloser, Codec, ...WrapOption) *Transport
+	type dialCtor func(context.Context, Connector, Codec, ...DialOption) *DialTransport
+	type wrapCtor func(io.ReadWriteCloser, Codec, ...WrapOption) *WrapTransport
 	type readFrameFunc func(context.Context) ([]byte, error)
 	type writeFrameFunc func(context.Context, []byte) error
 	var _ dialCtor = Dial
 	var _ wrapCtor = Wrap
-	var _ readFrameFunc = (&Transport{}).ReadFrame
-	var _ writeFrameFunc = (&Transport{}).WriteFrame
+	var _ readFrameFunc = (&WrapTransport{}).ReadFrame
+	var _ writeFrameFunc = (&WrapTransport{}).WriteFrame
 	var _ fmt.Stringer = State(0)
-	_ = (&Transport{}).Close
-	_ = (&Transport{}).State
-	_ = (&Transport{}).LastReadAt
-	_ = (&Transport{}).LastWriteAt
-	_ = (&Transport{}).IdleFor
+	_ = FrameTransport((*WrapTransport)(nil))
+	_ = FrameTransport((*DialTransport)(nil))
+	_ = Observable((*WrapTransport)(nil))
+	_ = Observable((*DialTransport)(nil))
+	_ = (&WrapTransport{}).Close
+	_ = (&WrapTransport{}).State
+	_ = (&WrapTransport{}).LastReadAt
+	_ = (&WrapTransport{}).LastWriteAt
+	_ = (&WrapTransport{}).IdleFor
+	_ = (&DialTransport{}).Close
+	_ = (&DialTransport{}).State
+	_ = (&DialTransport{}).LastReadAt
+	_ = (&DialTransport{}).LastWriteAt
+	_ = (&DialTransport{}).IdleFor
 }
 
 func TestStateString(t *testing.T) {

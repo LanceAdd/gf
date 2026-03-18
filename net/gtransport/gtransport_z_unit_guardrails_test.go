@@ -56,7 +56,7 @@ func TestTransportWrapNilCodecReturnsError(t *testing.T) {
 }
 
 func TestTransportDialNilCodecReturnsError(t *testing.T) {
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		return nopReadWriteCloser{}, nil
 	}, nil)
 

@@ -1,13 +1,12 @@
 # gtransport
 
-`gtransport` provides framed I/O over stream connections through one public
-`Transport` model.
+`gtransport` provides framed I/O over stream connections.
 
 The package is centered on three ideas:
 
 - a `Codec` defines frame boundaries and encoding rules
-- a `Transport` performs synchronous frame reads and writes
-- transport lifecycle can come from either `Dial` or `Wrap`
+- `WrapTransport` performs synchronous frame reads and writes on one fixed connection
+- `DialTransport` adds managed dialing, reconnect, idle observation, and connection callbacks
 
 ## Primary API
 
@@ -17,19 +16,21 @@ type Codec interface {
     Encode(frame []byte) ([]byte, error)
 }
 
-type Transport struct{}
+type FrameTransport interface {
+    ReadFrame(ctx context.Context) ([]byte, error)
+    WriteFrame(ctx context.Context, frame []byte) error
+    Close() error
+    State() State
+}
 
-func Dial(connector Connector, codec Codec, opts ...DialOption) *Transport
-func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *Transport
+type Observable interface {
+    IdleFor(now time.Time) time.Duration
+    LastReadAt() time.Time
+    LastWriteAt() time.Time
+}
 
-func (t *Transport) ReadFrame(ctx context.Context) ([]byte, error)
-func (t *Transport) WriteFrame(ctx context.Context, frame []byte) error
-func (t *Transport) Close() error
-
-func (t *Transport) State() State
-func (t *Transport) LastReadAt() time.Time
-func (t *Transport) LastWriteAt() time.Time
-func (t *Transport) IdleFor(now time.Time) time.Duration
+func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *WrapTransport
+func Dial(ctx context.Context, connector Connector, codec Codec, opts ...DialOption) *DialTransport
 ```
 
 ## Dial vs Wrap
@@ -62,7 +63,7 @@ That no-replay rule is intentional:
 
 ## Observability
 
-`Transport` exposes transport facts, not transport policy:
+Shared observation surface:
 
 - `State()` reports `idle`, `connecting`, `ready`, or `closed`
 - `State` implements `fmt.Stringer`, so `%s`/`%v` output uses those same names
@@ -73,17 +74,32 @@ That no-replay rule is intentional:
 If a connection is ready but has not yet produced a frame, idle time is measured
 from the ready time of that connection.
 
+Dial-only observation and lifecycle helpers:
+
+- `LastFrameAt()` reports the last successful full-frame read and survives reconnects
+- `EnsureConnected(ctx)` triggers a connect attempt when the dial transport is idle
+- `WithIdleTimeout`, `WithOnIdle`, `WithOnConnect`, `WithOnConnectionLost`, and `WithOnConnectFail` expose watchdog-driven callbacks
+
 ## Options
 
-Shared transport options:
+Wrap options:
 
 - `WithReadTimeout(d time.Duration)`
 - `WithMaxBufferBytes(n int)`
 
-Dial-only options:
+Dial options:
 
+- `WithDialReadTimeout(d time.Duration)`
+- `WithDialMaxBufferBytes(n int)`
 - `WithConnectTimeout(d time.Duration)`
 - `WithReconnectBackoff(func(attempt int) time.Duration)`
+- `WithMinStableDuration(d time.Duration)`
+- `WithIdleTimeout(d time.Duration)`
+- `WithOnIdle(func())`
+- `WithOnConnect(func(first bool))`
+- `WithOnConnectionLost(func(err error))`
+- `WithOnConnectFail(func(err error))`
+- `WithPollInterval(d time.Duration)`
 
 ## Common Codecs
 
@@ -122,10 +138,11 @@ return tr.WriteFrame(context.Background(), frame)
 Reconnectable outbound flow:
 
 ```go
-tr := gtransport.Dial(connector, codec, gtransport.WithConnectTimeout(3*time.Second))
+ctx := context.Background()
+tr := gtransport.Dial(ctx, connector, codec, gtransport.WithConnectTimeout(3*time.Second))
 defer tr.Close()
 
-if err := tr.WriteFrame(context.Background(), payload); err != nil {
+if err := tr.WriteFrame(ctx, payload); err != nil {
     return err
 }
 ```
@@ -207,7 +224,14 @@ ADCP codec semantics:
 
 ## Final API
 
-The final public creation API is:
+The public creation API is:
 
 - `Dial`
 - `Wrap`
+
+The public transport types are:
+
+- `WrapTransport`
+- `DialTransport`
+- `FrameTransport`
+- `Observable`

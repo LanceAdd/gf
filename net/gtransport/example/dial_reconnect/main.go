@@ -52,8 +52,10 @@ func main() {
 		return net.DialTimeout("tcp", addr, 3*time.Second)
 	}
 	codec := gtransport.NewLengthPrefixed(2, binary.BigEndian, 1024)
+	ctx := context.Background()
 
 	tr := gtransport.Dial(
+		ctx,
 		connector,
 		codec,
 		gtransport.WithConnectTimeout(3*time.Second),
@@ -64,8 +66,6 @@ func main() {
 		}),
 	)
 	defer tr.Close()
-
-	ctx := context.Background()
 
 	fmt.Printf("dial_reconnect: initial state: %s\n", tr.State())
 

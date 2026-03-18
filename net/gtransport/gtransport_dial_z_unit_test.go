@@ -12,16 +12,16 @@ import (
 func TestTransportDialPublicAPIShape(t *testing.T) {
 	var _ = Dial
 
-	type ctor func(Connector, Codec, ...DialOption) *Transport
+	type ctor func(context.Context, Connector, Codec, ...DialOption) *DialTransport
 
 	var _ ctor = Dial
-	_ = (&Transport{}).ReadFrame
-	_ = (&Transport{}).WriteFrame
-	_ = (&Transport{}).Close
-	_ = (&Transport{}).LastReadAt
-	_ = (&Transport{}).LastWriteAt
-	_ = (&Transport{}).IdleFor
-	_ = (&Transport{}).State
+	_ = (&DialTransport{}).ReadFrame
+	_ = (&DialTransport{}).WriteFrame
+	_ = (&DialTransport{}).Close
+	_ = (&DialTransport{}).LastReadAt
+	_ = (&DialTransport{}).LastWriteAt
+	_ = (&DialTransport{}).IdleFor
+	_ = (&DialTransport{}).State
 
 	var connector Connector = func(context.Context) (io.ReadWriteCloser, error) {
 		return nil, nil
@@ -35,7 +35,7 @@ func TestTransportDialPublicAPIShape(t *testing.T) {
 func TestTransportDialConnectOnFirstRead(t *testing.T) {
 	var calls int
 
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		calls++
 		return &scriptedManagedConn{
 			reads: []scriptedManagedRead{
@@ -62,7 +62,7 @@ func TestTransportDialConnectOnFirstWrite(t *testing.T) {
 		conn  = &scriptedManagedConn{}
 	)
 
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		calls++
 		return conn, nil
 	}, NewDelimiter([]byte("|"), 1024, true))
@@ -84,7 +84,7 @@ func TestTransportDialReconnectAfterReadFailure(t *testing.T) {
 		calls   int
 	)
 
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		calls++
 		if calls == 1 {
 			return &scriptedManagedConn{
@@ -129,7 +129,7 @@ func TestTransportDialReconnectAfterWriteFailure(t *testing.T) {
 		conn2 = &scriptedManagedConn{}
 	)
 
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		calls++
 		if calls == 1 {
 			return conn1, nil
@@ -156,7 +156,7 @@ func TestTransportDialReconnectAfterWriteFailure(t *testing.T) {
 func TestTransportDialClosePreventsReconnect(t *testing.T) {
 	var calls int
 
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		calls++
 		return &scriptedManagedConn{}, nil
 	}, NewDelimiter([]byte("|"), 1024, true))
@@ -175,7 +175,7 @@ func TestTransportDialClosePreventsReconnect(t *testing.T) {
 }
 
 func TestTransportDialActivityReadUpdatesLastReadAt(t *testing.T) {
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		return &scriptedManagedConn{
 			reads: []scriptedManagedRead{
 				{data: []byte("hello|")},
@@ -200,7 +200,7 @@ func TestTransportDialActivityReadUpdatesLastReadAt(t *testing.T) {
 }
 
 func TestTransportDialActivityWriteUpdatesLastWriteAt(t *testing.T) {
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		return &scriptedManagedConn{}, nil
 	}, NewDelimiter([]byte("|"), 1024, true))
 
@@ -217,7 +217,7 @@ func TestTransportDialActivityWriteUpdatesLastWriteAt(t *testing.T) {
 }
 
 func TestTransportDialIdleUsesReadyAtBeforeFirstRead(t *testing.T) {
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		return &scriptedManagedConn{}, nil
 	}, NewDelimiter([]byte("|"), 1024, true))
 
@@ -237,7 +237,7 @@ func TestTransportDialIdleUsesLastReadAtAfterSuccessfulRead(t *testing.T) {
 			{data: []byte("world|")},
 		},
 	}
-	tr := Dial(func(context.Context) (io.ReadWriteCloser, error) {
+	tr := Dial(context.Background(), func(context.Context) (io.ReadWriteCloser, error) {
 		return conn, nil
 	}, NewDelimiter([]byte("|"), 1024, true))
 

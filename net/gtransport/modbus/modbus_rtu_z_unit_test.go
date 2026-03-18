@@ -202,23 +202,17 @@ func TestRTUDecodeRejectsWriteMultipleRegistersResponseQuantityOutOfRange(t *tes
 	}
 }
 
-func TestRTUDecodeInvalidCRC(t *testing.T) {
+func TestRTUDecodeInvalidCRCReturnsNeedMoreDataForResync(t *testing.T) {
 	_, _, err := NewRTU().Decode([]byte{0x01, 0x03, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00})
-	if err == nil {
-		t.Fatal("expected invalid CRC error")
-	}
-	if err == gtransport.ErrNeedMoreData {
-		t.Fatal("expected invalid CRC error, got ErrNeedMoreData")
+	if err != gtransport.ErrNeedMoreData {
+		t.Fatalf("expected ErrNeedMoreData, got %v", err)
 	}
 }
 
-func TestRTUDecodeUnsupportedFunction(t *testing.T) {
+func TestRTUDecodeUnsupportedFunctionReturnsNeedMoreDataForResync(t *testing.T) {
 	_, _, err := NewRTU().Decode([]byte{0x01, 0x11, 0x00, 0x00})
-	if err == nil {
-		t.Fatal("expected unsupported function error")
-	}
-	if err == gtransport.ErrNeedMoreData {
-		t.Fatal("expected unsupported function error, got ErrNeedMoreData")
+	if err != gtransport.ErrNeedMoreData {
+		t.Fatalf("expected ErrNeedMoreData, got %v", err)
 	}
 }
 

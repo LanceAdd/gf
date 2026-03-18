@@ -1,12 +1,12 @@
 # gtransport
 
-`gtransport` 通过一个统一的 `Transport` 模型，为流式连接提供分帧读写能力。
+`gtransport` 为流式连接提供分帧读写能力。
 
 这个包围绕三个核心概念展开：
 
 - `Codec` 负责定义帧边界和编码规则
-- `Transport` 负责同步读写完整帧
-- transport 生命周期来自 `Dial` 或 `Wrap`
+- `WrapTransport` 负责在固定连接上同步读写完整帧
+- `DialTransport` 负责主动建连、重连、idle 观测以及连接事件回调
 
 ## 主 API
 
@@ -16,19 +16,21 @@ type Codec interface {
     Encode(frame []byte) ([]byte, error)
 }
 
-type Transport struct{}
+type FrameTransport interface {
+    ReadFrame(ctx context.Context) ([]byte, error)
+    WriteFrame(ctx context.Context, frame []byte) error
+    Close() error
+    State() State
+}
 
-func Dial(connector Connector, codec Codec, opts ...DialOption) *Transport
-func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *Transport
+type Observable interface {
+    IdleFor(now time.Time) time.Duration
+    LastReadAt() time.Time
+    LastWriteAt() time.Time
+}
 
-func (t *Transport) ReadFrame(ctx context.Context) ([]byte, error)
-func (t *Transport) WriteFrame(ctx context.Context, frame []byte) error
-func (t *Transport) Close() error
-
-func (t *Transport) State() State
-func (t *Transport) LastReadAt() time.Time
-func (t *Transport) LastWriteAt() time.Time
-func (t *Transport) IdleFor(now time.Time) time.Duration
+func Wrap(conn io.ReadWriteCloser, codec Codec, opts ...WrapOption) *WrapTransport
+func Dial(ctx context.Context, connector Connector, codec Codec, opts ...DialOption) *DialTransport
 ```
 
 ## Dial 与 Wrap
@@ -59,7 +61,7 @@ func (t *Transport) IdleFor(now time.Time) time.Duration
 
 ## 观测能力
 
-`Transport` 暴露的是事实，不是策略：
+共享观测能力：
 
 - `State()` 返回 `idle`、`connecting`、`ready`、`closed`
 - `State` 实现了 `fmt.Stringer`，因此 `%s`/`%v` 输出会直接使用这些名字
@@ -69,17 +71,32 @@ func (t *Transport) IdleFor(now time.Time) time.Duration
 
 如果连接已经 ready，但还从未成功读到任何帧，则 idle 基线取该连接的 ready 时间。
 
+仅 `DialTransport` 提供的附加观测/生命周期能力：
+
+- `LastFrameAt()` 返回最近一次成功读到完整帧的时间，并且跨重连保留
+- `EnsureConnected(ctx)` 会在当前为 idle 时主动触发一次建连
+- `WithIdleTimeout`、`WithOnIdle`、`WithOnConnect`、`WithOnConnectionLost`、`WithOnConnectFail` 提供 watchdog 驱动的回调能力
+
 ## 可选项
 
-共享 transport 可选项：
+`WrapTransport` 可选项：
 
 - `WithReadTimeout(d time.Duration)`
 - `WithMaxBufferBytes(n int)`
 
-仅 `Dial` 适用的可选项：
+`DialTransport` 可选项：
 
+- `WithDialReadTimeout(d time.Duration)`
+- `WithDialMaxBufferBytes(n int)`
 - `WithConnectTimeout(d time.Duration)`
 - `WithReconnectBackoff(func(attempt int) time.Duration)`
+- `WithMinStableDuration(d time.Duration)`
+- `WithIdleTimeout(d time.Duration)`
+- `WithOnIdle(func())`
+- `WithOnConnect(func(first bool))`
+- `WithOnConnectionLost(func(err error))`
+- `WithOnConnectFail(func(err error))`
+- `WithPollInterval(d time.Duration)`
 
 ## 常用 Codec
 
@@ -118,10 +135,11 @@ return tr.WriteFrame(context.Background(), frame)
 可重连的主动连接流程：
 
 ```go
-tr := gtransport.Dial(connector, codec, gtransport.WithConnectTimeout(3*time.Second))
+ctx := context.Background()
+tr := gtransport.Dial(ctx, connector, codec, gtransport.WithConnectTimeout(3*time.Second))
 defer tr.Close()
 
-if err := tr.WriteFrame(context.Background(), payload); err != nil {
+if err := tr.WriteFrame(ctx, payload); err != nil {
     return err
 }
 ```
@@ -203,7 +221,14 @@ ADCP codec 语义：
 
 ## 最终 API
 
-最终公开创建入口只保留：
+公开创建入口为：
 
 - `Dial`
 - `Wrap`
+
+公开 transport 类型为：
+
+- `WrapTransport`
+- `DialTransport`
+- `FrameTransport`
+- `Observable`
