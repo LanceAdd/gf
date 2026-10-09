@@ -4,19 +4,21 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
+// Map validation converts parameters to a map, checks nested values, and runs field rules.
+
 package gvalid
 
 import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/internal/reflection"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
+// doCheckMap validates map parameters with rules from Validator.Rules.
 func (v *Validator) doCheckMap(ctx context.Context, params any) Error {
 	if params == nil {
 		return nil
@@ -35,27 +37,7 @@ func (v *Validator) doCheckMap(ctx context.Context, params any) Error {
 			if len(name) == 0 {
 				continue
 			}
-			if len(msg) > 0 {
-				var (
-					msgArray  = strings.Split(msg, "|")
-					ruleArray = strings.Split(rule, "|")
-				)
-				for k, ruleItem := range ruleArray {
-					// If length of custom messages is lesser than length of rules,
-					// the rest rules use the default error messages.
-					if len(msgArray) <= k {
-						continue
-					}
-					if len(msgArray[k]) == 0 {
-						continue
-					}
-					array := strings.Split(ruleItem, ":")
-					if _, ok := customMessage[name]; !ok {
-						customMessage[name] = make(map[string]string)
-					}
-					customMessage[name].(map[string]string)[strings.TrimSpace(array[0])] = strings.TrimSpace(msgArray[k])
-				}
-			}
+			appendRuleMessages(customMessage, name, rule, msg)
 			checkRules = append(checkRules, fieldRule{
 				Name: name,
 				Rule: rule,

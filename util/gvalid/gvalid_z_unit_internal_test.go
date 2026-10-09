@@ -44,6 +44,37 @@ func Test_parseSequenceTag(t *testing.T) {
 	})
 }
 
+func Test_appendRuleMessages(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		customMessage := make(CustomMsg)
+		appendRuleMessages(customMessage, "Name", "required|length:2,10", "名称不能为空|长度不合法")
+		msg := customMessage["Name"].(map[string]string)
+		t.Assert(msg["required"], "名称不能为空")
+		t.Assert(msg["length"], "长度不合法")
+	})
+	gtest.C(t, func(t *gtest.T) {
+		customMessage := make(CustomMsg)
+		appendRuleMessages(customMessage, "Name", "required|length:2,10", "名称不能为空")
+		msg := customMessage["Name"].(map[string]string)
+		t.Assert(msg["required"], "名称不能为空")
+		_, ok := msg["length"]
+		t.Assert(ok, false)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		customMessage := make(CustomMsg)
+		appendRuleMessages(customMessage, "Name", "required|length:2,10", "|长度不合法")
+		msg := customMessage["Name"].(map[string]string)
+		_, ok := msg["required"]
+		t.Assert(ok, false)
+		t.Assert(msg["length"], "长度不合法")
+	})
+	gtest.C(t, func(t *gtest.T) {
+		customMessage := make(CustomMsg)
+		appendRuleMessages(customMessage, "Name", "required", "")
+		t.Assert(len(customMessage), 0)
+	})
+}
+
 func Test_GetTags(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		t.Assert(structTagPriority, GetTags())

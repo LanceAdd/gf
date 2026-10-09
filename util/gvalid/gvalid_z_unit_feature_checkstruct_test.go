@@ -512,3 +512,34 @@ func Test_CheckStruct_PointerAttribute(t *testing.T) {
 		t.Assert(err.String(), "The Age value `0` must be equal or greater than 18")
 	})
 }
+
+func Test_CheckStruct_MapRuleAliasRewritesCaller(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		type Object struct {
+			Name string `v:"username@required|length:1,4"`
+		}
+		rules := map[string]string{
+			"Name": "length:1,3",
+		}
+		err := g.Validator().Data(&Object{Name: "john"}).Rules(rules).Run(context.TODO())
+		t.AssertNE(err, nil)
+		t.AssertNE(err.Maps()["username"], nil)
+		t.AssertNE(err.Maps()["username"]["length"], nil)
+		_, hasName := rules["Name"]
+		t.Assert(hasName, false)
+		t.Assert(rules["username"], "length:1,3")
+	})
+}
+
+func Test_CheckStruct_MetaRequiredOnEmptyValue(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		type Req struct {
+			g.Meta `v:"required"`
+			Name   string
+		}
+		err := g.Validator().Data(Req{Name: "john"}).Run(context.TODO())
+		t.AssertNE(err, nil)
+		t.AssertNE(err.Maps()["Meta"], nil)
+		t.AssertNE(err.Maps()["Meta"]["required"], nil)
+	})
+}
