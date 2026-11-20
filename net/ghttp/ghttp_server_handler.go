@@ -7,6 +7,7 @@
 package ghttp
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"sort"
@@ -129,7 +130,7 @@ func (s *Server) handleResponse(request *Request, sessionId string) {
 			if request.Response.BufferLength() == 0 {
 				request.Response.Write(err.Error())
 			}
-			request.Response.WriteHeader(http.StatusInternalServerError)
+			request.Response.WriteHeader(statusCodeForError(err))
 		} else {
 			request.Response.WriteHeader(http.StatusNotFound)
 		}
@@ -169,6 +170,18 @@ func (s *Server) handleResponse(request *Request, sessionId string) {
 	request.Response.Flush()
 }
 
+// statusCodeForError returns the response status code for the given request error.
+func statusCodeForError(err error) int {
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		return http.StatusRequestEntityTooLarge
+	}
+	if gerror.Code(err) == gcode.CodeInvalidRequest {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
 func (s *Server) handleAfterRequestDone(request *Request) {
 	request.LeaveTime = gtime.Now()
 	// error log handling.
@@ -176,8 +189,8 @@ func (s *Server) handleAfterRequestDone(request *Request) {
 		s.handleErrorLog(request.error, request)
 	} else {
 		if exception := recover(); exception != nil {
-			request.Response.WriteStatus(http.StatusInternalServerError)
 			if v, ok := exception.(error); ok {
+				request.Response.WriteStatus(statusCodeForError(v))
 				if code := gerror.Code(v); code != gcode.CodeNil {
 					s.handleErrorLog(v, request)
 				} else {
@@ -187,6 +200,7 @@ func (s *Server) handleAfterRequestDone(request *Request) {
 					)
 				}
 			} else {
+				request.Response.WriteStatus(http.StatusInternalServerError)
 				s.handleErrorLog(
 					gerror.NewCodeSkipf(gcode.CodeInternalPanic, 1, "%+v", exception),
 					request,

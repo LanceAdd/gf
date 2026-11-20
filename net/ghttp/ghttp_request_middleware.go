@@ -109,7 +109,7 @@ func (m *middleware) Next() {
 				// of the real error point.
 				m.request.error = gerror.WrapCodeSkip(gcode.CodeInternalError, 1, exception, "")
 			}
-			m.request.Response.WriteStatus(http.StatusInternalServerError, exception)
+			m.request.Response.WriteStatus(statusCodeForError(exception), exception)
 			loop = false
 		})
 	}
