@@ -447,21 +447,20 @@ func (j *Json) getPointerByPatternWithoutViolenceCheck(pattern string) *any {
 		return j.p
 	}
 
-	pointer := j.p
-	if len(pattern) == 0 {
-		return pointer
-	}
-	array := strings.Split(pattern, string(j.c))
-	for k, v := range array {
-		if r := j.checkPatternByPointer(v, pointer); r != nil {
-			if k == len(array)-1 {
-				return r
-			} else {
-				pointer = r
-			}
-		} else {
+	var (
+		segments = parsePath(pattern, j.c)
+		length   = segments.size()
+		pointer  = j.p
+	)
+	for k := 0; k < length; k++ {
+		r := j.checkPatternByPointer(segments.segment(k), pointer)
+		if r == nil {
 			break
 		}
+		if k == length-1 {
+			return r
+		}
+		pointer = r
 	}
 	return nil
 }
@@ -475,11 +474,8 @@ func (j *Json) checkPatternByPointer(key string, pointer *any) *any {
 			return &v
 		}
 	case []any:
-		if gstr.IsNumeric(key) {
-			n, err := strconv.Atoi(key)
-			if err == nil && len((*pointer).([]any)) > n {
-				return &(*pointer).([]any)[n]
-			}
+		if n, ok := segmentArrayIndex(key); ok && len((*pointer).([]any)) > n {
+			return &(*pointer).([]any)[n]
 		}
 	}
 	return nil
