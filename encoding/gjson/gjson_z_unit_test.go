@@ -8,6 +8,7 @@ package gjson_test
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/gogf/gf/v2/container/gmap"
@@ -361,6 +362,37 @@ func Test_Append(t *testing.T) {
 		t.AssertNE(err, nil)
 		t.Assert(p.Get("a"), 1)
 	})
+}
+
+func Test_Append_Concurrent(t *testing.T) {
+	const count = 100
+	for _, tc := range []struct {
+		root    any
+		pattern string
+	}{
+		{[]any{}, "."},
+		{map[string]any{"list": []any{}}, "list"},
+	} {
+		gtest.C(t, func(t *gtest.T) {
+			j := gjson.New(tc.root, true)
+			var (
+				wg   sync.WaitGroup
+				errs = make([]error, count)
+			)
+			for i := 0; i < count; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					errs[i] = j.Append(tc.pattern, i)
+				}(i)
+			}
+			wg.Wait()
+			for _, err := range errs {
+				t.AssertNil(err)
+			}
+			t.Assert(j.Len(tc.pattern), count)
+		})
+	}
 }
 
 func Test_RawArray(t *testing.T) {

@@ -94,13 +94,18 @@ func (j *Json) setValue(pattern string, value any, removed bool) error {
 	if value, err = j.convertValue(value); err != nil {
 		return err
 	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.setValueLocked(pattern, value, removed)
+}
+
+// setValueLocked sets an already converted value, the caller must hold j.mu.
+func (j *Json) setValueLocked(pattern string, value any, removed bool) error {
 	args := &setPathArgs{
 		pattern:  pattern,
 		value:    value,
 		removing: removed && value == nil,
 	}
-	j.mu.Lock()
-	defer j.mu.Unlock()
 	newRoot, err := j.setPath(*j.p, parsePath(pattern, j.c), args)
 	if err != nil {
 		return err

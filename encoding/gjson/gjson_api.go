@@ -161,19 +161,28 @@ func (j *Json) Len(pattern string) int {
 // Append appends value to the value by specified `pattern`.
 // The target value by `pattern` should be type of slice.
 func (j *Json) Append(pattern string, value any) error {
+	var err error
+	if value, err = j.convertValue(value); err != nil {
+		return err
+	}
+	// Reading the length and writing the new element must share one lock,
+	// otherwise concurrent appends can pick the same index.
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
 	p := j.getPointerByPattern(pattern)
 	if p == nil || *p == nil {
 		if pattern == "." {
-			return j.Set("0", value)
+			return j.setValueLocked("0", value, false)
 		}
-		return j.Set(fmt.Sprintf("%s.0", pattern), value)
+		return j.setValueLocked(fmt.Sprintf("%s.0", pattern), value, false)
 	}
 	switch (*p).(type) {
 	case []any:
 		if pattern == "." {
-			return j.Set(fmt.Sprintf("%d", len((*p).([]any))), value)
+			return j.setValueLocked(fmt.Sprintf("%d", len((*p).([]any))), value, false)
 		}
-		return j.Set(fmt.Sprintf("%s.%d", pattern, len((*p).([]any))), value)
+		return j.setValueLocked(fmt.Sprintf("%s.%d", pattern, len((*p).([]any))), value, false)
 	}
 	return gerror.NewCodef(gcode.CodeInvalidParameter, "invalid variable type of %s", pattern)
 }
