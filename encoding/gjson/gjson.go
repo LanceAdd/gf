@@ -10,7 +10,6 @@ package gjson
 import (
 	"reflect"
 	"strconv"
-	"strings"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -91,10 +90,7 @@ type iVal interface {
 // 1. If value is nil and removed is true, means deleting this value;
 // 2. It's quite complicated in hierarchical data search, node creating and data assignment;
 func (j *Json) setValue(pattern string, value any, removed bool) error {
-	var (
-		err   error
-		array = strings.Split(pattern, string(j.c))
-	)
+	var err error
 	if value, err = j.convertValue(value); err != nil {
 		return err
 	}
@@ -105,7 +101,7 @@ func (j *Json) setValue(pattern string, value any, removed bool) error {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	newRoot, err := j.setPath(*j.p, array, args)
+	newRoot, err := j.setPath(*j.p, parsePath(pattern, j.c), args)
 	if err != nil {
 		return err
 	}
@@ -123,10 +119,10 @@ type setPathArgs struct {
 // setPath resolves the remaining pattern segments and returns the new node value.
 // It updates the current node only after the child node is resolved, so an error
 // leaves the data unchanged.
-func (j *Json) setPath(node any, array []string, args *setPathArgs) (any, error) {
+func (j *Json) setPath(node any, segments path, args *setPathArgs) (any, error) {
 	var (
-		segment = array[0]
-		rest    = array[1:]
+		segment = segments.segment(0)
+		rest    = segments.slice(1)
 	)
 	switch v := node.(type) {
 	case map[string]any:
@@ -139,8 +135,8 @@ func (j *Json) setPath(node any, array []string, args *setPathArgs) (any, error)
 }
 
 // setMapPath resolves one pattern segment against a map node.
-func (j *Json) setMapPath(node map[string]any, segment string, rest []string, args *setPathArgs) (any, error) {
-	if len(rest) == 0 {
+func (j *Json) setMapPath(node map[string]any, segment string, rest path, args *setPathArgs) (any, error) {
+	if rest.size() == 0 {
 		if args.removing {
 			delete(node, segment)
 			return node, nil
@@ -157,7 +153,7 @@ func (j *Json) setMapPath(node map[string]any, segment string, rest []string, ar
 			return node, nil
 		}
 		var err error
-		if child, err = newSetNode(rest[0], args.pattern); err != nil {
+		if child, err = newSetNode(rest.segment(0), args.pattern); err != nil {
 			return nil, err
 		}
 	}
@@ -173,12 +169,12 @@ func (j *Json) setMapPath(node map[string]any, segment string, rest []string, ar
 }
 
 // setArrayPath resolves one pattern segment against an array node.
-func (j *Json) setArrayPath(node []any, segment string, rest []string, args *setPathArgs) (any, error) {
+func (j *Json) setArrayPath(node []any, segment string, rest path, args *setPathArgs) (any, error) {
 	if !gstr.IsNumeric(segment) {
 		if args.removing {
 			return node, nil
 		}
-		if len(rest) == 0 {
+		if rest.size() == 0 {
 			return map[string]any{segment: args.value}, nil
 		}
 		return j.setPath(map[string]any{}, rest, args)
@@ -187,7 +183,7 @@ func (j *Json) setArrayPath(node []any, segment string, rest []string, args *set
 	if err != nil {
 		return nil, err
 	}
-	if len(rest) == 0 {
+	if rest.size() == 0 {
 		if args.removing {
 			if n < len(node) {
 				return append(node[:n], node[n+1:]...), nil
@@ -210,7 +206,7 @@ func (j *Json) setArrayPath(node []any, segment string, rest []string, args *set
 		if args.removing {
 			return node, nil
 		}
-		if child, err = newSetNode(rest[0], args.pattern); err != nil {
+		if child, err = newSetNode(rest.segment(0), args.pattern); err != nil {
 			return nil, err
 		}
 	}
@@ -229,12 +225,12 @@ func (j *Json) setArrayPath(node []any, segment string, rest []string, args *set
 }
 
 // setDefaultPath replaces a scalar node with the hierarchy built from the remaining segments.
-func (j *Json) setDefaultPath(node any, segment string, rest []string, args *setPathArgs) (any, error) {
+func (j *Json) setDefaultPath(node any, segment string, rest path, args *setPathArgs) (any, error) {
 	if args.removing {
 		return node, nil
 	}
 	if !gstr.IsNumeric(segment) {
-		if len(rest) == 0 {
+		if rest.size() == 0 {
 			return map[string]any{segment: args.value}, nil
 		}
 		child, err := j.setPath(nil, rest, args)
@@ -248,7 +244,7 @@ func (j *Json) setDefaultPath(node any, segment string, rest []string, args *set
 		return nil, err
 	}
 	nodeArray := make([]any, n+1)
-	if len(rest) == 0 {
+	if rest.size() == 0 {
 		nodeArray[n] = args.value
 		return nodeArray, nil
 	}

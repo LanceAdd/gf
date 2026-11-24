@@ -35,6 +35,13 @@ func (p path) segment(index int) string {
 	return p.segments[index]
 }
 
+// slice returns the sub-path starting at the given segment index.
+func (p path) slice(from int) path {
+	return path{
+		segments: p.segments[from:],
+	}
+}
+
 // segmentArrayIndex returns the array index encoded in a pattern segment.
 // It returns false when the segment is not a non-negative integer.
 func segmentArrayIndex(segment string) (int, bool) {
