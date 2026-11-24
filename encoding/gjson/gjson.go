@@ -261,13 +261,17 @@ func (j *Json) setDefaultPath(node any, segment string, rest path, args *setPath
 	return nodeArray, nil
 }
 
+// maxPatternArrayIndex is the maximum array index accepted in a pattern.
+// Larger indexes are rejected instead of pre-allocating huge arrays.
+const maxPatternArrayIndex = 1 << 20
+
 // parseArrayIndex parses a non-negative array index from a pattern segment.
 func parseArrayIndex(segment, pattern string) (int, error) {
 	n, err := strconv.Atoi(segment)
 	if err != nil {
 		return 0, gerror.WrapCodef(gcode.CodeInvalidParameter, err, `strconv.Atoi failed for string "%s"`, segment)
 	}
-	if n < 0 {
+	if n < 0 || n > maxPatternArrayIndex {
 		return 0, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid array index "%s" in pattern "%s"`, segment, pattern)
 	}
 	return n, nil

@@ -236,6 +236,29 @@ func Test_NegativeIndex(t *testing.T) {
 	})
 }
 
+func Test_ArrayIndexLimit(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"a":[1]}`)
+		before := j.MustToJsonString()
+		t.AssertNE(j.Set("a.9223372036854775807", 9), nil)
+		t.AssertNE(j.Set("a.1000000000", 9), nil)
+		t.AssertNE(j.Set("a.1048577", 9), nil)
+		t.AssertNE(j.Remove("a.1048577"), nil)
+		t.Assert(j.MustToJsonString(), before)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(nil)
+		t.AssertNE(j.Set("9223372036854775807", 9), nil)
+		t.AssertNE(j.Set("x.9223372036854775807.y", 1), nil)
+		t.Assert(j.IsNil(), true)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"a":[]}`)
+		t.AssertNil(j.Set("a.5", 9))
+		t.Assert(j.Get("a.5"), 9)
+	})
+}
+
 func Test_GetVar(t *testing.T) {
 	data := []byte(`{"n":123456789, "m":{"k":"v"}, "a":[1,2,3]}`)
 	gtest.C(t, func(t *gtest.T) {
