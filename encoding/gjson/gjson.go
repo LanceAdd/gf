@@ -398,35 +398,35 @@ func (j *Json) getPointerByPatternWithViolenceCheck(pattern string) *any {
 	}
 
 	var (
-		index   = len(pattern)
-		start   = 0
-		length  = 0
-		pointer = j.p
+		segments = parsePath(pattern, j.c)
+		pointer  = j.p
+		base     = 0
 	)
-	if index == 0 {
-		return pointer
-	}
-	for {
-		if r := j.checkPatternByPointer(pattern[start:index], pointer); r != nil {
-			if length += index - start; start > 0 {
-				length += 1
+	for i := 0; i < segments.size(); i++ {
+		var (
+			end     = len(pattern)
+			matched = false
+		)
+		for k := segments.size(); k > i; k-- {
+			// Try the longest remaining key first, then move the end
+			// before the last separator.
+			key := pattern[base:end]
+			if key != "" {
+				if r := j.checkPatternByPointer(key, pointer); r != nil {
+					if k == segments.size() {
+						return r
+					}
+					pointer = r
+					base = end + 1
+					i = k - 1
+					matched = true
+					break
+				}
 			}
-			start = index + 1
-			index = len(pattern)
-			if length == len(pattern) {
-				return r
-			} else {
-				pointer = r
-			}
-		} else {
-			// Get the position for next separator char.
-			index = strings.LastIndexByte(pattern[start:index], j.c)
-			if index != -1 && length > 0 {
-				index += length + 1
-			}
+			end -= len(segments.segment(k-1)) + 1
 		}
-		if start >= index {
-			break
+		if !matched {
+			return nil
 		}
 	}
 	return nil

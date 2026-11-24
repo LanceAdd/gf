@@ -50,3 +50,49 @@ func Test_Get_Pattern(t *testing.T) {
 		t.Assert(j.Get("missing", "def").String(), "def")
 	})
 }
+
+func Test_Get_Pattern_ViolenceCheck(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"m":{"a":[1,2,3],"v1.v2":"4"}}`)
+		t.Assert(j.Get("m.v1.v2"), nil)
+		j.SetViolenceCheck(true)
+		t.Assert(j.Get("m.v1.v2"), 4)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"a.b":1,"a":{"b":2}}`)
+		j.SetViolenceCheck(true)
+		t.Assert(j.Get("a.b").Int(), 1)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"a.b":{"c.d":5},"a.b.c.d":6}`)
+		j.SetViolenceCheck(true)
+		t.Assert(j.Get("a.b.c.d").Int(), 6)
+		j2 := gjson.New(`{"a.b":{"c.d":5}}`)
+		j2.SetViolenceCheck(true)
+		t.Assert(j2.Get("a.b.c.d").Int(), 5)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"a.b":[10,20]}`)
+		j.SetViolenceCheck(true)
+		t.Assert(j.Get("a.b.1").Int(), 20)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(map[string]any{
+			"":  map[string]any{"b": 2},
+			"a": map[string]any{"": 3},
+		})
+		t.Assert(j.Get(".b").Int(), 2)
+		t.Assert(j.Get("a.").Int(), 3)
+		j.SetViolenceCheck(true)
+		t.Assert(j.Get(".b"), nil)
+		t.Assert(j.Get("a."), nil)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		j := gjson.New(`{"a":{"b":1}}`)
+		j.SetViolenceCheck(true)
+		t.Assert(j.Get(""), nil)
+		t.Assert(j.Get(".").String(), `{"a":{"b":1}}`)
+		t.Assert(j.Get("a.b").Int(), 1)
+		t.Assert(j.Get("a.x"), nil)
+	})
+}
