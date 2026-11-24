@@ -7,8 +7,6 @@
 package gjson
 
 import (
-	"fmt"
-
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -110,6 +108,9 @@ func (j *Json) GetJsonMap(pattern string, def ...any) map[string]*Json {
 // Set sets value with specified `pattern`.
 // It supports hierarchical data access by char separator, which is '.' in default.
 func (j *Json) Set(pattern string, value any) error {
+	if j == nil {
+		return gerror.NewCode(gcode.CodeInvalidParameter, "nil json object")
+	}
 	return j.setValue(pattern, value, false)
 }
 
@@ -123,6 +124,9 @@ func (j *Json) MustSet(pattern string, value any) {
 // Remove deletes value with specified `pattern`.
 // It supports hierarchical data access by char separator, which is '.' in default.
 func (j *Json) Remove(pattern string) error {
+	if j == nil {
+		return gerror.NewCode(gcode.CodeInvalidParameter, "nil json object")
+	}
 	return j.setValue(pattern, nil, true)
 }
 
@@ -142,6 +146,9 @@ func (j *Json) Contains(pattern string) bool {
 // The target value by `pattern` should be type of slice or map.
 // It returns -1 if the target value is not found, or its type is invalid.
 func (j *Json) Len(pattern string) int {
+	if j == nil {
+		return -1
+	}
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	p := j.getPointerByPattern(pattern)
@@ -161,30 +168,16 @@ func (j *Json) Len(pattern string) int {
 // Append appends value to the value by specified `pattern`.
 // The target value by `pattern` should be type of slice.
 func (j *Json) Append(pattern string, value any) error {
+	if j == nil {
+		return gerror.NewCode(gcode.CodeInvalidParameter, "nil json object")
+	}
 	var err error
 	if value, err = j.convertValue(value); err != nil {
 		return err
 	}
-	// Reading the length and writing the new element must share one lock,
-	// otherwise concurrent appends can pick the same index.
 	j.mu.Lock()
 	defer j.mu.Unlock()
-
-	p := j.getPointerByPattern(pattern)
-	if p == nil || *p == nil {
-		if pattern == "." {
-			return j.setValueLocked("0", value, false)
-		}
-		return j.setValueLocked(fmt.Sprintf("%s.0", pattern), value, false)
-	}
-	switch (*p).(type) {
-	case []any:
-		if pattern == "." {
-			return j.setValueLocked(fmt.Sprintf("%d", len((*p).([]any))), value, false)
-		}
-		return j.setValueLocked(fmt.Sprintf("%s.%d", pattern, len((*p).([]any))), value, false)
-	}
-	return gerror.NewCodef(gcode.CodeInvalidParameter, "invalid variable type of %s", pattern)
+	return j.appendValueLocked(pattern, value)
 }
 
 // MustAppend performs as Append, but it panics if any error occurs.

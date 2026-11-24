@@ -7,7 +7,10 @@
 package gjson
 
 // MarshalJSON implements the interface MarshalJSON for json.Marshal.
-func (j Json) MarshalJSON() ([]byte, error) {
+func (j *Json) MarshalJSON() ([]byte, error) {
+	if j == nil {
+		return []byte("null"), nil
+	}
 	return j.ToJson()
 }
 
@@ -18,8 +21,11 @@ func (j *Json) UnmarshalJSON(b []byte) error {
 		StrNumber: true,
 	})
 	if r != nil {
-		// Value copy.
-		*j = *r
+		j.mu.Lock()
+		j.p = r.p
+		j.c = r.c
+		j.vc = r.vc
+		j.mu.Unlock()
 	}
 	return err
 }
@@ -29,8 +35,11 @@ func (j *Json) UnmarshalValue(value any) error {
 	if r := NewWithOptions(value, Options{
 		StrNumber: true,
 	}); r != nil {
-		// Value copy.
-		*j = *r
+		j.mu.Lock()
+		j.p = r.p
+		j.c = r.c
+		j.vc = r.vc
+		j.mu.Unlock()
 	}
 	return nil
 }

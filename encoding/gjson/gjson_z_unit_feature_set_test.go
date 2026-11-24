@@ -20,14 +20,17 @@ import (
 func Test_Set_NestedArray(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		j := gjson.New(`{"a":[[1]]}`)
-		t.AssertNil(j.Set("a.0.3", 9))
-		t.Assert(j.Get("a.0.3"), 9)
-		t.Assert(j.Get("a.0").Array(), g.Array{1, nil, nil, 9})
+		// Arrays only grow one element at a time.
+		t.AssertNE(j.Set("a.0.3", 9), nil)
+		t.Assert(j.Get("a.0").Array(), g.Array{1})
+		t.AssertNil(j.Set("a.0.1", 9))
+		t.Assert(j.Get("a.0").Array(), g.Array{1, 9})
 	})
 	gtest.C(t, func(t *gtest.T) {
 		j := gjson.New(`{"a":[1]}`)
-		t.AssertNil(j.Set("a.x", 2))
-		t.Assert(j.Get("a.x"), 2)
+		// Non-numeric segments cannot replace an array.
+		t.AssertNE(j.Set("a.x", 2), nil)
+		t.Assert(j.MustToJsonString(), `{"a":[1]}`)
 	})
 }
 
@@ -50,27 +53,21 @@ func Test_Set1(t *testing.T) {
 
 func Test_Set2(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		e := `[[null,1]]`
 		p := gjson.New([]string{"a"})
-		p.Set("0.1", 1)
-		s := p.MustToJsonString()
-		t.Assert(s, e)
+		// Creating a sparse array over an existing scalar is rejected.
+		t.AssertNE(p.Set("0.1", 1), nil)
+		t.Assert(p.MustToJsonString(), `["a"]`)
+		t.AssertNil(p.Set("0.0", 1))
+		t.Assert(p.MustToJsonString(), `[[1]]`)
 	})
 }
 
 func Test_Set3(t *testing.T) {
-	e := []byte(`{"kv":{"k1":"v1"}}`)
-	p := gjson.New([]string{"a"})
-	p.Set("kv", map[string]string{
-		"k1": "v1",
+	gtest.C(t, func(t *gtest.T) {
+		p := gjson.New([]string{"a"})
+		t.AssertNE(p.Set("kv", g.Map{"k1": "v1"}), nil)
+		t.Assert(p.MustToJsonString(), `["a"]`)
 	})
-	if c, err := p.ToJson(); err == nil {
-		if !bytes.Equal(c, e) {
-			t.Error("expect:", string(e))
-		}
-	} else {
-		t.Error(err)
-	}
 }
 
 func Test_Set4(t *testing.T) {
@@ -118,54 +115,36 @@ func Test_Set6(t *testing.T) {
 }
 
 func Test_Set7(t *testing.T) {
-	e := []byte(`{"0":[null,[1,2,3]],"k1":"v1","k2":"v2"}`)
-	p := gjson.New(map[string]string{
-		"k1": "v1",
-		"k2": "v2",
+	gtest.C(t, func(t *gtest.T) {
+		p := gjson.New(map[string]string{
+			"k1": "v1",
+			"k2": "v2",
+		})
+		t.AssertNE(p.Set("0.1", []int{1, 2, 3}), nil)
+		t.Assert(p.MustToJsonString(), `{"k1":"v1","k2":"v2"}`)
 	})
-	p.Set("0.1", []int{1, 2, 3})
-	if c, err := p.ToJson(); err == nil {
-
-		if !bytes.Equal(c, e) {
-			t.Error("expect:", string(e))
-		}
-	} else {
-		t.Error(err)
-	}
 }
 
 func Test_Set8(t *testing.T) {
-	e := []byte(`{"0":[[[[[[null,[1,2,3]]]]]]],"k1":"v1","k2":"v2"}`)
-	p := gjson.New(map[string]string{
-		"k1": "v1",
-		"k2": "v2",
+	gtest.C(t, func(t *gtest.T) {
+		p := gjson.New(map[string]string{
+			"k1": "v1",
+			"k2": "v2",
+		})
+		t.AssertNE(p.Set("0.0.0.0.0.0.1", []int{1, 2, 3}), nil)
+		t.Assert(p.MustToJsonString(), `{"k1":"v1","k2":"v2"}`)
 	})
-	p.Set("0.0.0.0.0.0.1", []int{1, 2, 3})
-	if c, err := p.ToJson(); err == nil {
-
-		if !bytes.Equal(c, e) {
-			t.Error("expect:", string(e))
-		}
-	} else {
-		t.Error(err)
-	}
 }
 
 func Test_Set9(t *testing.T) {
-	e := []byte(`{"k1":[null,[1,2,3]],"k2":"v2"}`)
-	p := gjson.New(map[string]string{
-		"k1": "v1",
-		"k2": "v2",
+	gtest.C(t, func(t *gtest.T) {
+		p := gjson.New(map[string]string{
+			"k1": "v1",
+			"k2": "v2",
+		})
+		t.AssertNE(p.Set("k1.1", []int{1, 2, 3}), nil)
+		t.Assert(p.MustToJsonString(), `{"k1":"v1","k2":"v2"}`)
 	})
-	p.Set("k1.1", []int{1, 2, 3})
-	if c, err := p.ToJson(); err == nil {
-
-		if !bytes.Equal(c, e) {
-			t.Error("expect:", string(e))
-		}
-	} else {
-		t.Error(err)
-	}
 }
 
 func Test_Set10(t *testing.T) {
@@ -292,36 +271,27 @@ func Test_Set17(t *testing.T) {
 
 		t.Assert(j.Set("0.k1", "v1"), nil)
 		t.Assert(j.Set("1.k2", "v2"), nil)
-		// overwrite the previous slice.
-		t.Assert(j.Set("k", "v"), nil)
-
-		s, err := j.ToJsonString()
-		t.AssertNil(err)
-		t.Assert(s, `{"k":"v"}`)
+		t.Assert(j.MustToJsonString(), `[{"k1":"v1"},{"k2":"v2"}]`)
+		// A non-numeric segment cannot replace an array.
+		t.AssertNE(j.Set("k", "v"), nil)
+		t.Assert(j.MustToJsonString(), `[{"k1":"v1"},{"k2":"v2"}]`)
 	})
 }
 
 func Test_Set18(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		j := gjson.New(nil)
-
-		t.Assert(j.Set("0.1.k1", "v1"), nil)
-		t.Assert(j.Set("0.2.k2", "v2"), nil)
-		s, err := j.ToJsonString()
-		t.AssertNil(err)
-		t.Assert(s, `[[null,{"k1":"v1"},{"k2":"v2"}]]`)
+		// Sparse creation over a missing index is rejected.
+		t.AssertNE(j.Set("0.1.k1", "v1"), nil)
+		t.Assert(j.IsNil(), true)
 	})
 }
 
 func Test_Set19(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		j := gjson.New(nil)
-
-		t.Assert(j.Set("0.1.1.k1", "v1"), nil)
-		t.Assert(j.Set("0.2.1.k2", "v2"), nil)
-		s, err := j.ToJsonString()
-		t.AssertNil(err)
-		t.Assert(s, `[[null,[null,{"k1":"v1"}],[null,{"k2":"v2"}]]]`)
+		t.AssertNE(j.Set("0.1.1.k1", "v1"), nil)
+		t.Assert(j.IsNil(), true)
 	})
 }
 

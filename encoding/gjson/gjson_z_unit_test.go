@@ -169,52 +169,45 @@ func Test_NegativeIndex(t *testing.T) {
 		t.AssertNE(j.Remove("a.-1"), nil)
 		t.Assert(j.MustToJsonString(), before)
 
-		// Failed calls leave the content unchanged, including nil roots.
+		// Negative strings are map keys, not array indexes.
 		nilJson := gjson.New(nil)
-		t.AssertNE(nilJson.Set("-1", 9), nil)
-		t.AssertNE(nilJson.Set("x.-1", 1), nil)
+		t.AssertNil(nilJson.Set("-1", 9))
+		t.Assert(nilJson.Get("-1"), 9)
+		t.AssertNil(nilJson.Set("x.-1", 1))
+		t.Assert(nilJson.Get("x.-1"), 1)
 		t.AssertNil(nilJson.Remove("-1"))
 		t.AssertNil(nilJson.Remove("x.-1"))
-		t.Assert(nilJson.IsNil(), true)
+		t.Assert(nilJson.IsNil(), false)
 
-		// Negative indexes in non-leaf segments used as the next node size.
 		j = gjson.New(`{}`)
-		before = j.MustToJsonString()
-		t.AssertNE(j.Set("x.-1", 1), nil)
-		t.AssertNE(j.Set("x.-2", 1), nil)
-		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("x.-1", 1))
+		t.Assert(j.Get("x.-1"), 1)
 
 		j = gjson.New(`{"a":[1]}`)
-		before = j.MustToJsonString()
-		t.AssertNE(j.Set("a.0.-2", 1), nil)
-		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("a.0.-2", 1))
+		t.Assert(j.Get("a.0.-2"), 1)
 
 		j = gjson.New(`{"a":[]}`)
 		before = j.MustToJsonString()
 		t.AssertNE(j.Set("a.5.-2", 1), nil)
 		t.Assert(j.MustToJsonString(), before)
 
-		// The negative index at the tail is rejected before intermediate nodes are created.
+		// Negative strings become map keys of the created node.
 		j = gjson.New(`{"a":1}`)
-		before = j.MustToJsonString()
-		t.AssertNE(j.Set("a.0.-1", 9), nil)
-		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("a.0.-1", 9))
+		t.Assert(j.Get("a.0.-1"), 9)
 
 		j = gjson.New(`{"a":[1]}`)
-		before = j.MustToJsonString()
-		t.AssertNE(j.Set("a.0.b.-1", 9), nil)
-		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("a.0.b.-1", 9))
+		t.Assert(j.Get("a.0.b.-1"), 9)
 
 		j = gjson.New(`{"a":1}`)
-		before = j.MustToJsonString()
-		t.AssertNE(j.Set("a.0.b.c.-1", 9), nil)
-		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("a.0.b.c.-1", 9))
+		t.Assert(j.Get("a.0.b.c.-1"), 9)
 
-		// Failures below an already created node also leave the data unchanged.
 		j = gjson.New(`{}`)
-		before = j.MustToJsonString()
-		t.AssertNE(j.Set("x.0.-1", 1), nil)
-		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("x.0.-1", 1))
+		t.Assert(j.Get("x.0.-1"), 1)
 
 		j = gjson.New(`{"a":[]}`)
 		before = j.MustToJsonString()
@@ -236,26 +229,30 @@ func Test_NegativeIndex(t *testing.T) {
 	})
 }
 
-func Test_ArrayIndexLimit(t *testing.T) {
+func Test_ArrayDenseSemantics(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		j := gjson.New(`{"a":[1]}`)
 		before := j.MustToJsonString()
 		t.AssertNE(j.Set("a.9223372036854775807", 9), nil)
 		t.AssertNE(j.Set("a.1000000000", 9), nil)
-		t.AssertNE(j.Set("a.1048577", 9), nil)
-		t.AssertNE(j.Remove("a.1048577"), nil)
+		t.AssertNE(j.Set("a.3", 9), nil)
 		t.Assert(j.MustToJsonString(), before)
+		t.AssertNil(j.Set("a.1", 9))
+		t.Assert(j.MustToJsonString(), `{"a":[1,9]}`)
 	})
 	gtest.C(t, func(t *gtest.T) {
 		j := gjson.New(nil)
 		t.AssertNE(j.Set("9223372036854775807", 9), nil)
 		t.AssertNE(j.Set("x.9223372036854775807.y", 1), nil)
+		t.AssertNE(j.Set("x.1.y", 1), nil)
 		t.Assert(j.IsNil(), true)
+		t.AssertNil(j.Set("x.0.y", 1))
+		t.Assert(j.MustToJsonString(), `{"x":[{"y":1}]}`)
 	})
 	gtest.C(t, func(t *gtest.T) {
-		j := gjson.New(`{"a":[]}`)
-		t.AssertNil(j.Set("a.5", 9))
-		t.Assert(j.Get("a.5"), 9)
+		j := gjson.New(`{"a":[1,2]}`)
+		t.AssertNil(j.Remove("a.5"))
+		t.Assert(j.MustToJsonString(), `{"a":[1,2]}`)
 	})
 }
 
@@ -579,8 +576,8 @@ func Test_Basic(t *testing.T) {
 
 		j = gjson.New(`[1,2,3]`)
 		err = j.Set("\"0\".1", 11)
-		t.AssertNil(err)
-		t.Assert(j.Get("1"), 11)
+		t.AssertNE(err, nil)
+		t.Assert(j.MustToJsonString(), `[1,2,3]`)
 
 		j = gjson.New(`[1,2,3]`)
 		err = j.Set("11111111111111111111111", 11)
@@ -625,15 +622,15 @@ func Test_Basic(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(j.Get("0"), 1)
 
-		// Removing a non-numeric path from an array keeps the array unchanged.
+		// A non-numeric path on an array is invalid.
 		j = gjson.New(`{"a":[1,2,3]}`)
-		t.AssertNil(j.Remove("a.x"))
+		t.AssertNE(j.Remove("a.x"), nil)
 		t.Assert(j.MustToJsonString(), `{"a":[1,2,3]}`)
-		t.AssertNil(j.Remove("a.x.y"))
+		t.AssertNE(j.Remove("a.x.y"), nil)
 		t.Assert(j.MustToJsonString(), `{"a":[1,2,3]}`)
 
 		j = gjson.New(`[1,2,3]`)
-		t.AssertNil(j.Remove("x"))
+		t.AssertNE(j.Remove("x"), nil)
 		t.Assert(j.MustToJsonString(), `[1,2,3]`)
 
 		name := struct {

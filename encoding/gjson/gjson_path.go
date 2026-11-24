@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 // path is a pattern split into segments for hierarchical data access.
@@ -19,10 +20,58 @@ type path struct {
 }
 
 // parsePath splits a pattern using the separator char.
-func parsePath(pattern string, separator byte) path {
-	return path{
-		segments: strings.Split(pattern, string(separator)),
+//
+// The separator and the backslash can be escaped with a backslash.
+// Empty segments are invalid.
+func parsePath(pattern string, separator byte) (path, error) {
+	if pattern == "" {
+		return path{}, gerror.NewCode(gcode.CodeInvalidParameter, `invalid empty pattern`)
 	}
+	if separator == '\\' || !strings.ContainsRune(pattern, '\\') {
+		segments := strings.Split(pattern, string(separator))
+		for _, segment := range segments {
+			if segment == "" {
+				return path{}, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid empty segment in pattern "%s"`, pattern)
+			}
+		}
+		return path{segments: segments}, nil
+	}
+	var (
+		segments []string
+		segment  strings.Builder
+		escaped  bool
+	)
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		if escaped {
+			if c != separator && c != '\\' {
+				return path{}, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid escape "\%c" in pattern "%s"`, c, pattern)
+			}
+			segment.WriteByte(c)
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case separator:
+			if segment.Len() == 0 {
+				return path{}, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid empty segment in pattern "%s"`, pattern)
+			}
+			segments = append(segments, segment.String())
+			segment.Reset()
+		default:
+			segment.WriteByte(c)
+		}
+	}
+	if escaped {
+		return path{}, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid trailing escape in pattern "%s"`, pattern)
+	}
+	if segment.Len() == 0 {
+		return path{}, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid empty segment in pattern "%s"`, pattern)
+	}
+	segments = append(segments, segment.String())
+	return path{segments: segments}, nil
 }
 
 // size returns the segment count.
@@ -42,14 +91,32 @@ func (p path) slice(from int) path {
 	}
 }
 
-// segmentArrayIndex returns the array index encoded in a pattern segment.
-// It returns false when the segment is not a non-negative integer.
-func segmentArrayIndex(segment string) (int, bool) {
-	if !gstr.IsNumeric(segment) {
+// hasEscape reports whether the pattern uses escapes.
+func hasEscape(pattern string, separator byte) bool {
+	return separator != '\\' && strings.ContainsRune(pattern, '\\')
+}
+
+// isDigits reports whether the segment contains only decimal digits.
+func isDigits(segment string) bool {
+	if segment == "" {
+		return false
+	}
+	for i := 0; i < len(segment); i++ {
+		if segment[i] < '0' || segment[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// segmentIndex parses a decimal array index from a pattern segment.
+// It returns false when the segment is not a decimal number that fits int.
+func segmentIndex(segment string) (int, bool) {
+	if !isDigits(segment) {
 		return 0, false
 	}
 	n, err := strconv.Atoi(segment)
-	if err != nil || n < 0 {
+	if err != nil {
 		return 0, false
 	}
 	return n, true

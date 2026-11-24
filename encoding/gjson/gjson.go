@@ -9,14 +9,12 @@ package gjson
 
 import (
 	"reflect"
-	"strconv"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/reflection"
 	"github.com/gogf/gf/v2/internal/rwmutex"
 	"github.com/gogf/gf/v2/internal/utils"
-	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
@@ -101,12 +99,16 @@ func (j *Json) setValue(pattern string, value any, removed bool) error {
 
 // setValueLocked sets an already converted value, the caller must hold j.mu.
 func (j *Json) setValueLocked(pattern string, value any, removed bool) error {
+	segments, err := parsePath(pattern, j.c)
+	if err != nil {
+		return err
+	}
 	args := &setPathArgs{
 		pattern:  pattern,
 		value:    value,
 		removing: removed && value == nil,
 	}
-	newRoot, err := j.setPath(*j.p, parsePath(pattern, j.c), args)
+	newRoot, err := j.setPath(*j.p, segments, args)
 	if err != nil {
 		return err
 	}
@@ -175,18 +177,9 @@ func (j *Json) setMapPath(node map[string]any, segment string, rest path, args *
 
 // setArrayPath resolves one pattern segment against an array node.
 func (j *Json) setArrayPath(node []any, segment string, rest path, args *setPathArgs) (any, error) {
-	if !gstr.IsNumeric(segment) {
-		if args.removing {
-			return node, nil
-		}
-		if rest.size() == 0 {
-			return map[string]any{segment: args.value}, nil
-		}
-		return j.setPath(map[string]any{}, rest, args)
-	}
-	n, err := parseArrayIndex(segment, args.pattern)
-	if err != nil {
-		return nil, err
+	n, ok := segmentIndex(segment)
+	if !ok {
+		return nil, newInvalidArrayIndexError(segment, args.pattern)
 	}
 	if rest.size() == 0 {
 		if args.removing {
@@ -199,34 +192,34 @@ func (j *Json) setArrayPath(node []any, segment string, rest path, args *setPath
 			node[n] = args.value
 			return node, nil
 		}
-		extended := make([]any, n+1)
-		copy(extended, node)
-		extended[n] = args.value
-		return extended, nil
-	}
-	var child any
-	if n < len(node) {
-		child = node[n]
-	} else {
-		if args.removing {
-			return node, nil
+		if n == len(node) {
+			return append(node, args.value), nil
 		}
-		if child, err = newSetNode(rest.segment(0), args.pattern); err != nil {
+		return nil, newArrayIndexOutOfRangeError(segment, args.pattern)
+	}
+	if n < len(node) {
+		newChild, err := j.setPath(node[n], rest, args)
+		if err != nil {
 			return nil, err
 		}
-	}
-	newChild, err := j.setPath(child, rest, args)
-	if err != nil {
-		return nil, err
-	}
-	if n < len(node) {
 		node[n] = newChild
 		return node, nil
 	}
-	extended := make([]any, n+1)
-	copy(extended, node)
-	extended[n] = newChild
-	return extended, nil
+	if args.removing {
+		return node, nil
+	}
+	if n == len(node) {
+		child, err := newSetNode(rest.segment(0), args.pattern)
+		if err != nil {
+			return nil, err
+		}
+		newChild, err := j.setPath(child, rest, args)
+		if err != nil {
+			return nil, err
+		}
+		return append(node, newChild), nil
+	}
+	return nil, newArrayIndexOutOfRangeError(segment, args.pattern)
 }
 
 // setDefaultPath replaces a scalar node with the hierarchy built from the remaining segments.
@@ -234,59 +227,214 @@ func (j *Json) setDefaultPath(node any, segment string, rest path, args *setPath
 	if args.removing {
 		return node, nil
 	}
-	if !gstr.IsNumeric(segment) {
-		if rest.size() == 0 {
-			return map[string]any{segment: args.value}, nil
+	if isDigits(segment) {
+		n, ok := segmentIndex(segment)
+		if !ok {
+			return nil, newInvalidArrayIndexError(segment, args.pattern)
 		}
-		child, err := j.setPath(nil, rest, args)
+		if n != 0 {
+			return nil, newArrayIndexOutOfRangeError(segment, args.pattern)
+		}
+		nodeArray := make([]any, 1)
+		if rest.size() == 0 {
+			nodeArray[0] = args.value
+			return nodeArray, nil
+		}
+		child, err := newSetNode(rest.segment(0), args.pattern)
+		if err != nil {
+			return nil, err
+		}
+		newChild, err := j.setPath(child, rest, args)
+		if err != nil {
+			return nil, err
+		}
+		nodeArray[0] = newChild
+		return nodeArray, nil
+	}
+	if rest.size() == 0 {
+		return map[string]any{segment: args.value}, nil
+	}
+	child, err := newSetNode(rest.segment(0), args.pattern)
+	if err != nil {
+		return nil, err
+	}
+	newChild, err := j.setPath(child, rest, args)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{segment: newChild}, nil
+}
+
+// newSetNode creates an empty node matching the type implied by the next segment.
+func newSetNode(segment, pattern string) (any, error) {
+	if isDigits(segment) {
+		if _, ok := segmentIndex(segment); !ok {
+			return nil, newInvalidArrayIndexError(segment, pattern)
+		}
+		return make([]any, 0), nil
+	}
+	return map[string]any{}, nil
+}
+
+func newInvalidArrayIndexError(segment, pattern string) error {
+	return gerror.NewCodef(gcode.CodeInvalidParameter, `invalid array index "%s" in pattern "%s"`, segment, pattern)
+}
+
+func newArrayIndexOutOfRangeError(segment, pattern string) error {
+	return gerror.NewCodef(gcode.CodeInvalidParameter, `array index "%s" out of range in pattern "%s"`, segment, pattern)
+}
+
+func newInvalidVariableTypeError(pattern string) error {
+	return gerror.NewCodef(gcode.CodeInvalidParameter, "invalid variable type of %s", pattern)
+}
+
+// appendValueLocked appends an already converted value, the caller must hold j.mu.
+func (j *Json) appendValueLocked(pattern string, value any) error {
+	if pattern == "." {
+		node, err := appendToArray(*j.p, value, pattern)
+		if err != nil {
+			return err
+		}
+		*j.p = node
+		return nil
+	}
+	segments, err := parsePath(pattern, j.c)
+	if err != nil {
+		return err
+	}
+	newRoot, err := j.appendPath(*j.p, segments, value, pattern)
+	if err != nil {
+		return err
+	}
+	*j.p = newRoot
+	return nil
+}
+
+// appendPath resolves the target node and appends one element to it.
+func (j *Json) appendPath(node any, segments path, value any, pattern string) (any, error) {
+	if segments.size() == 0 {
+		return appendToArray(node, value, pattern)
+	}
+	var (
+		segment = segments.segment(0)
+		rest    = segments.slice(1)
+	)
+	switch v := node.(type) {
+	case map[string]any:
+		if rest.size() == 0 {
+			if v == nil {
+				return map[string]any{segment: []any{value}}, nil
+			}
+			child, ok := v[segment]
+			if !ok || child == nil {
+				v[segment] = []any{value}
+				return v, nil
+			}
+			array, ok := child.([]any)
+			if !ok {
+				return nil, newInvalidVariableTypeError(pattern)
+			}
+			v[segment] = append(array, value)
+			return v, nil
+		}
+		child, ok := v[segment]
+		if !ok {
+			var err error
+			if child, err = newSetNode(rest.segment(0), pattern); err != nil {
+				return nil, err
+			}
+		}
+		newChild, err := j.appendPath(child, rest, value, pattern)
+		if err != nil {
+			return nil, err
+		}
+		if v == nil {
+			v = make(map[string]any)
+		}
+		v[segment] = newChild
+		return v, nil
+	case []any:
+		n, ok := segmentIndex(segment)
+		if !ok {
+			return nil, newInvalidArrayIndexError(segment, pattern)
+		}
+		if rest.size() == 0 {
+			if n < len(v) {
+				return appendArrayElement(v, n, value, pattern)
+			}
+			if n == len(v) {
+				return append(v, []any{value}), nil
+			}
+			return nil, newArrayIndexOutOfRangeError(segment, pattern)
+		}
+		if n < len(v) {
+			newChild, err := j.appendPath(v[n], rest, value, pattern)
+			if err != nil {
+				return nil, err
+			}
+			v[n] = newChild
+			return v, nil
+		}
+		if n == len(v) {
+			child, err := newSetNode(rest.segment(0), pattern)
+			if err != nil {
+				return nil, err
+			}
+			newChild, err := j.appendPath(child, rest, value, pattern)
+			if err != nil {
+				return nil, err
+			}
+			return append(v, newChild), nil
+		}
+		return nil, newArrayIndexOutOfRangeError(segment, pattern)
+	default:
+		if isDigits(segment) {
+			n, ok := segmentIndex(segment)
+			if !ok {
+				return nil, newInvalidArrayIndexError(segment, pattern)
+			}
+			if n != 0 {
+				return nil, newArrayIndexOutOfRangeError(segment, pattern)
+			}
+			child, err := j.appendPath(nil, rest, value, pattern)
+			if err != nil {
+				return nil, err
+			}
+			return []any{child}, nil
+		}
+		child, err := j.appendPath(nil, rest, value, pattern)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{segment: child}, nil
 	}
-	n, err := parseArrayIndex(segment, args.pattern)
-	if err != nil {
-		return nil, err
-	}
-	nodeArray := make([]any, n+1)
-	if rest.size() == 0 {
-		nodeArray[n] = args.value
-		return nodeArray, nil
-	}
-	child, err := j.setPath(nil, rest, args)
-	if err != nil {
-		return nil, err
-	}
-	nodeArray[n] = child
-	return nodeArray, nil
 }
 
-// maxPatternArrayIndex is the maximum array index accepted in a pattern.
-// Larger indexes are rejected instead of pre-allocating huge arrays.
-const maxPatternArrayIndex = 1 << 20
-
-// parseArrayIndex parses a non-negative array index from a pattern segment.
-func parseArrayIndex(segment, pattern string) (int, error) {
-	n, err := strconv.Atoi(segment)
-	if err != nil {
-		return 0, gerror.WrapCodef(gcode.CodeInvalidParameter, err, `strconv.Atoi failed for string "%s"`, segment)
+// appendArrayElement appends value to the array stored at node[index].
+func appendArrayElement(node []any, index int, value any, pattern string) (any, error) {
+	child := node[index]
+	if child == nil {
+		node[index] = []any{value}
+		return node, nil
 	}
-	if n < 0 || n > maxPatternArrayIndex {
-		return 0, gerror.NewCodef(gcode.CodeInvalidParameter, `invalid array index "%s" in pattern "%s"`, segment, pattern)
+	array, ok := child.([]any)
+	if !ok {
+		return nil, newInvalidVariableTypeError(pattern)
 	}
-	return n, nil
+	node[index] = append(array, value)
+	return node, nil
 }
 
-// newSetNode creates an empty node matching the type implied by the next segment.
-func newSetNode(segment, pattern string) (any, error) {
-	if !gstr.IsNumeric(segment) {
-		return map[string]any{}, nil
+// appendToArray appends value to the given array node.
+func appendToArray(node any, value any, pattern string) (any, error) {
+	if node == nil {
+		return []any{value}, nil
 	}
-	n, err := parseArrayIndex(segment, pattern)
-	if err != nil {
-		return nil, err
+	array, ok := node.([]any)
+	if !ok {
+		return nil, newInvalidVariableTypeError(pattern)
 	}
-	return make([]any, n+1), nil
+	return append(array, value), nil
 }
 
 // convertValue converts `value` to map[string]any or []any,
@@ -367,10 +515,16 @@ func (j *Json) getPointerByPatternWithViolenceCheck(pattern string) *any {
 		return j.p
 	}
 
+	if hasEscape(pattern, j.c) {
+		return nil
+	}
+	segments, err := parsePath(pattern, j.c)
+	if err != nil {
+		return nil
+	}
 	var (
-		segments = parsePath(pattern, j.c)
-		pointer  = j.p
-		base     = 0
+		pointer = j.p
+		base    = 0
 	)
 	for i := 0; i < segments.size(); i++ {
 		var (
@@ -417,10 +571,13 @@ func (j *Json) getPointerByPatternWithoutViolenceCheck(pattern string) *any {
 		return j.p
 	}
 
+	segments, err := parsePath(pattern, j.c)
+	if err != nil {
+		return nil
+	}
 	var (
-		segments = parsePath(pattern, j.c)
-		length   = segments.size()
-		pointer  = j.p
+		length  = segments.size()
+		pointer = j.p
 	)
 	for k := 0; k < length; k++ {
 		r := j.checkPatternByPointer(segments.segment(k), pointer)
@@ -444,7 +601,7 @@ func (j *Json) checkPatternByPointer(key string, pointer *any) *any {
 			return &v
 		}
 	case []any:
-		if n, ok := segmentArrayIndex(key); ok && len((*pointer).([]any)) > n {
+		if n, ok := segmentIndex(key); ok && len((*pointer).([]any)) > n {
 			return &(*pointer).([]any)[n]
 		}
 	}
